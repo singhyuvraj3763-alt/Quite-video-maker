@@ -174,7 +174,6 @@ def render_full_video():
 
         print(f"Rendering clip for Scene {scene_num}...")
 
-        # FFmpeg command: loops image to match audio duration, scales to 1920x1080
         cmd = [
             "ffmpeg", "-y",
             "-loop", "1", "-i", image_file,
@@ -191,3 +190,41 @@ def render_full_video():
         f.write("\n".join(valid_clips))
 
     print(f"Stitching {len(valid_clips)} clips into final documentary video...")
+    final_output = "final_documentary.mp4"
+    concat_cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", clip_list_path,
+        "-c", "copy",
+        final_output
+    ]
+    subprocess.run(concat_cmd, check=True)
+    print(f"Video created successfully: {final_output}")
+
+# ----------------- MAIN DISPATCHER -----------------
+if __name__ == "__main__":
+    mode = sys.argv[1] if len(sys.argv) > 1 else "script"
+    topic = sys.argv[2] if len(sys.argv) > 2 else "The Mahindra story in Hindi"
+    num_scenes = int(sys.argv[3]) if len(sys.argv) > 3 else 24
+
+    if mode == "script":
+        script_json_str = generate_script(topic, num_scenes=num_scenes)
+        try:
+            parsed = json.loads(script_json_str)
+        except Exception as e:
+            print("Failed to parse JSON:", e)
+            print("Raw text:", script_json_str)
+            sys.exit(1)
+            
+        with open("script.json", "w", encoding="utf-8") as f:
+            json.dump(parsed, f, ensure_ascii=False, indent=2)
+        print("script.json successfully created and saved!")
+
+    elif mode in ["audio", "video"]:
+        asyncio.run(generate_voiceovers())
+        generate_visuals()
+        render_full_video()
+
+    else:
+        print(f"Unknown mode: {mode}")
+        sys.exit(1)
