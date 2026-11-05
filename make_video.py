@@ -2,10 +2,10 @@ import os
 import sys
 import json
 import time
+import shutil
 import asyncio
 import subprocess
-import urllib.parse
-import urllib.request
+import requests
 import edge_tts
 
 # ----------------- STEP 1: SCRIPT LOGIC -----------------
@@ -33,7 +33,7 @@ def generate_script(topic, num_scenes=24):
         }}
       ]
     }}
-    For 'visual_prompt', give only 2 or 3 simple English search words (for example: 'tractor', 'steel factory', 'vintage car', 'highway truck', 'modern car assembly', 'business meeting').
+    For 'visual_prompt', give 1 or 2 simple English words representing the scene (e.g., 'tractor', 'factory', 'car', 'highway', 'engine', 'business').
     Ensure there are exactly {num_scenes} scenes in the 'scenes' list. Output raw JSON only.
     """
 
@@ -87,7 +87,7 @@ async def generate_voiceovers():
 
     print("Voiceovers ready in 'audio/' folder!")
 
-# ----------------- STEP 3: RELIABLE HD VISUALS -----------------
+# ----------------- STEP 3: RELIABLE VISUALS LOGIC -----------------
 def generate_visuals():
     if not os.path.exists("script.json"):
         print("Error: script.json not found!")
@@ -99,55 +99,50 @@ def generate_visuals():
     scenes = data.get("scenes", [])
     os.makedirs("images", exist_ok=True)
 
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    curated_keywords = [
-        "tractor", "vintage car", "factory", "industrial assembly", "diesel engine",
-        "highway transport", "business meeting", "steel plant", "offroad vehicle",
-        "electric car", "racing car", "commercial truck", "modern workshop", "indian highway"
-    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    }
 
     for scene in scenes:
         scene_num = scene["scene_number"]
-        raw_prompt = scene.get("visual_prompt", "")
         img_path = f"images/scene_{scene_num}.jpg"
 
-        clean_words = [w.lower() for w in raw_prompt.replace(",", " ").split() if len(w) > 2]
-        keyword = clean_words[0] if clean_words else curated_keywords[scene_num % len(curated_keywords)]
+        if os.path.exists(img_path) and os.path.getsize(img_path) > 5000:
+            continue
 
-        print(f"Fetching visual for Scene {scene_num} (keyword: '{keyword}')...")
+        print(f"Downloading visual for Scene {scene_num}...")
 
-        # 100% reliable Unsplash source URL (1920x1080 landscape)
-        url = f"[https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1920&h=1080&fit=crop&q=80](https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1920&h=1080&fit=crop&q=80)"
-        search_url = f"[https://source.unsplash.com/1920x1080/](https://source.unsplash.com/1920x1080/)?{urllib.parse.quote(keyword)}"
+        # Reliable high-resolution random landscape photography endpoint
+        # Using Picsum unique IDs to ensure every scene gets a distinct real photo
+        img_id = (scene_num * 17 + 25) % 1000
+        download_urls = [
+            f"[https://picsum.photos/id/](https://picsum.photos/id/){img_id}/1280/720",
+            f"[https://picsum.photos/1280/720?random=](https://picsum.photos/1280/720?random=){scene_num}",
+            "[https://picsum.photos/1280/720](https://picsum.photos/1280/720)"
+        ]
 
-        success = False
-        for target_url in [
-            f"[https://loremflickr.com/1920/1080/](https://loremflickr.com/1920/1080/){urllib.parse.quote(keyword)}",
-            f"[https://picsum.photos/1920/1080?random=](https://picsum.photos/1920/1080?random=){scene_num}",
-        ]:
+        downloaded = False
+        for url in download_urls:
             try:
-                req = urllib.request.Request(target_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=15) as res:
-                    img_data = res.read()
-                    if len(img_data) > 5000:
-                        with open(img_path, "wb") as f_out:
-                            f_out.write(img_data)
-                        success = True
-                        break
+                res = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
+                if res.status_code == 200 and len(res.content) > 5000:
+                    with open(img_path, "wb") as f_out:
+                        f_out.write(res.content)
+                    downloaded = True
+                    break
             except Exception as e:
-                print(f"Attempt failed for Scene {scene_num}: {e}")
+                print(f"Scene {scene_num} fetch error from {url}: {e}")
                 time.sleep(1)
 
-        if not success:
-            # Fallback to previous scene or reliable solid slate
+        # Fallback if network drops
+        if not downloaded:
             prev_img = f"images/scene_{scene_num - 1}.jpg"
             if os.path.exists(prev_img) and os.path.getsize(prev_img) > 5000:
-                import shutil
                 shutil.copy(prev_img, img_path)
 
     print("All scene visuals successfully ready in 'images/' folder!")
 
-# ----------------- STEP 4: VIDEO RENDERING WITH ZOOM & SUBTITLES -----------------
+# ----------------- STEP 4: VIDEO RENDERING WITH ZOOM MOTION -----------------
 def render_full_video():
     if not os.path.exists("script.json"):
         print("Error: script.json not found!")
@@ -168,11 +163,12 @@ def render_full_video():
         clip_file = f"temp_clips/clip_{scene_num}.mp4"
 
         if not os.path.exists(audio_file) or not os.path.exists(image_file):
+            print(f"Skipping Scene {scene_num} - missing asset")
             continue
 
         print(f"Rendering clip for Scene {scene_num}...")
 
-        # Get audio duration
+        # Probe audio duration
         probe_cmd = [
             "ffprobe", "-v", "error", "-show_entries",
             "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audio_file
@@ -185,11 +181,11 @@ def render_full_video():
 
         total_frames = int(duration * 25)
 
-        # Smooth Ken Burns zoom effect
+        # Zoompan filter for subtle documentary motion
         zoom_filter = (
-            f"scale=1920:1080:force_original_aspect_ratio=increase,"
-            f"crop=1920:1080,"
-            f"zoompan=z='min(zoom+0.0010,1.15)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080:fps=25"
+            f"scale=1280:720:force_original_aspect_ratio=increase,"
+            f"crop=1280:720,"
+            f"zoompan=z='min(zoom+0.0008,1.15)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720:fps=25"
         )
 
         cmd = [
@@ -230,8 +226,7 @@ if __name__ == "__main__":
     topic = sys.argv[2] if len(sys.argv) > 2 else "The Mahindra story in Hindi"
     num_scenes = int(sys.argv[3]) if len(sys.argv) > 3 else 24
 
-    # Always clean old images and clips so black screens are never reused
-    import shutil
+    # Remove corrupted files from previous runs
     if os.path.exists("images"):
         shutil.rmtree("images")
     if os.path.exists("temp_clips"):
