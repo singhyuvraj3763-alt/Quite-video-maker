@@ -3,6 +3,8 @@ import sys
 import json
 import time
 import asyncio
+import urllib.parse
+import urllib.request
 import edge_tts
 
 # ----------------- STEP 1: SCRIPT LOGIC -----------------
@@ -62,7 +64,7 @@ VOICE = "hi-IN-SwaraNeural"
 
 async def generate_voiceovers():
     if not os.path.exists("script.json"):
-        print("Error: script.json not found! Run script generation first.")
+        print("Error: script.json not found!")
         sys.exit(1)
 
     with open("script.json", "r", encoding="utf-8") as f:
@@ -78,13 +80,79 @@ async def generate_voiceovers():
         narration = scene["narration"]
         audio_path = f"audio/scene_{scene_num}.mp3"
 
+        if os.path.exists(audio_path):
+            continue
+
         print(f"Generating audio for Scene {scene_num}...")
         communicate = edge_tts.Communicate(narration, VOICE)
         await communicate.save(audio_path)
 
-    print("All scene voiceovers generated successfully inside 'audio/' folder!")
+    print("Voiceovers ready in 'audio/' folder!")
 
-# ----------------- EXECUTION SWITCH -----------------
+# ----------------- STEP 3: VISUALS LOGIC (Zero-Key Open Stock) -----------------
+def download_wikimedia_image(query, target_path):
+    headers = {"User-Agent": "DocumentaryBot/1.0 (contact: test@example.com)"}
+    clean_query = urllib.parse.quote(query)
+    search_url = (
+        f"https://commons.wikimedia.org/w/api.php?action=query&generator=search"
+        f"&gsrnamespace=6&gsrsearch={clean_query}&gsrlimit=3&prop=imageinfo"
+        f"&iiprop=url|mime&format=json"
+    )
+
+    try:
+        req = urllib.request.Request(search_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as res:
+            res_data = json.loads(res.read().decode("utf-8"))
+            pages = res_data.get("query", {}).get("pages", {})
+            for _, page in pages.items():
+                image_info = page.get("imageinfo", [{}])[0]
+                img_url = image_info.get("url")
+                mime = image_info.get("mime", "")
+                if img_url and ("jpeg" in mime or "png" in mime or "jpg" in mime):
+                    img_req = urllib.request.Request(img_url, headers=headers)
+                    with urllib.request.urlopen(img_req, timeout=15) as img_res:
+                        with open(target_path, "wb") as out_file:
+                            out_file.write(img_res.read())
+                    return True
+    except Exception as e:
+        print(f"Fetch failed for query '{query}': {e}")
+    return False
+
+def generate_visuals():
+    if not os.path.exists("script.json"):
+        print("Error: script.json not found!")
+        sys.exit(1)
+
+    with open("script.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    scenes = data.get("scenes", [])
+    print(f"Found {len(scenes)} scenes to process for visuals...")
+    os.makedirs("images", exist_ok=True)
+
+    fallback_topics = ["Mahindra", "tractor", "factory", "vintage car", "industrial India", "business office"]
+
+    for scene in scenes:
+        scene_num = scene["scene_number"]
+        prompt = scene.get("visual_prompt", "")
+        img_path = f"images/scene_{scene_num}.jpg"
+
+        if os.path.exists(img_path):
+            continue
+
+        print(f"Fetching visual for Scene {scene_num}...")
+        
+        # Use first 3 keywords from visual prompt, or fallback
+        keywords = " ".join(prompt.replace(",", "").split()[:3])
+        success = download_wikimedia_image(keywords, img_path)
+
+        if not success:
+            fallback = fallback_topics[scene_num % len(fallback_topics)]
+            download_wikimedia_image(fallback, img_path)
+
+    print("All scene visuals downloaded into 'images/' folder!")
+
+# ----------------- MAIN DISPATCHER -----------------
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "script"
     topic = sys.argv[2] if len(sys.argv) > 2 else "The Mahindra story in Hindi"
@@ -102,12 +170,9 @@ if __name__ == "__main__":
             json.dump(parsed, f, ensure_ascii=False, indent=2)
         print("script.json successfully created and saved!")
 
-    elif mode == "audio":
+    elif mode in ["audio", "video"]:
         asyncio.run(generate_voiceovers())
-
-    elif mode == "video":
-        print("Video mode: generating audio voiceovers from existing script...")
-        asyncio.run(generate_voiceovers())
+        generate_visuals()
 
     else:
         print(f"Unknown mode: {mode}")
