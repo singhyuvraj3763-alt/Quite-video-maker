@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import asyncio
+import subprocess
 import urllib.parse
 import urllib.request
 import edge_tts
@@ -71,8 +72,6 @@ async def generate_voiceovers():
         data = json.load(f)
 
     scenes = data.get("scenes", [])
-    print(f"Found {len(scenes)} scenes to process for voiceover...")
-
     os.makedirs("audio", exist_ok=True)
 
     for scene in scenes:
@@ -89,7 +88,7 @@ async def generate_voiceovers():
 
     print("Voiceovers ready in 'audio/' folder!")
 
-# ----------------- STEP 3: VISUALS LOGIC (Zero-Key Open Stock) -----------------
+# ----------------- STEP 3: VISUALS LOGIC -----------------
 def download_wikimedia_image(query, target_path):
     headers = {"User-Agent": "DocumentaryBot/1.0 (contact: test@example.com)"}
     clean_query = urllib.parse.quote(query)
@@ -127,9 +126,7 @@ def generate_visuals():
         data = json.load(f)
 
     scenes = data.get("scenes", [])
-    print(f"Found {len(scenes)} scenes to process for visuals...")
     os.makedirs("images", exist_ok=True)
-
     fallback_topics = ["Mahindra", "tractor", "factory", "vintage car", "industrial India", "business office"]
 
     for scene in scenes:
@@ -141,8 +138,6 @@ def generate_visuals():
             continue
 
         print(f"Fetching visual for Scene {scene_num}...")
-        
-        # Use first 3 keywords from visual prompt, or fallback
         keywords = " ".join(prompt.replace(",", "").split()[:3])
         success = download_wikimedia_image(keywords, img_path)
 
@@ -152,28 +147,47 @@ def generate_visuals():
 
     print("All scene visuals downloaded into 'images/' folder!")
 
-# ----------------- MAIN DISPATCHER -----------------
-if __name__ == "__main__":
-    mode = sys.argv[1] if len(sys.argv) > 1 else "script"
-    topic = sys.argv[2] if len(sys.argv) > 2 else "The Mahindra story in Hindi"
-
-    if mode == "script":
-        script_json_str = generate_script(topic)
-        try:
-            parsed = json.loads(script_json_str)
-        except Exception as e:
-            print("Failed to parse JSON:", e)
-            print("Raw text:", script_json_str)
-            sys.exit(1)
-            
-        with open("script.json", "w", encoding="utf-8") as f:
-            json.dump(parsed, f, ensure_ascii=False, indent=2)
-        print("script.json successfully created and saved!")
-
-    elif mode in ["audio", "video"]:
-        asyncio.run(generate_voiceovers())
-        generate_visuals()
-
-    else:
-        print(f"Unknown mode: {mode}")
+# ----------------- STEP 4: VIDEO RENDERING LOGIC -----------------
+def render_full_video():
+    if not os.path.exists("script.json"):
+        print("Error: script.json not found!")
         sys.exit(1)
+
+    with open("script.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    scenes = data.get("scenes", [])
+    os.makedirs("temp_clips", exist_ok=True)
+    clip_list_path = "clips.txt"
+
+    valid_clips = []
+
+    for scene in scenes:
+        scene_num = scene["scene_number"]
+        audio_file = f"audio/scene_{scene_num}.mp3"
+        image_file = f"images/scene_{scene_num}.jpg"
+        clip_file = f"temp_clips/clip_{scene_num}.mp4"
+
+        if not os.path.exists(audio_file) or not os.path.exists(image_file):
+            print(f"Skipping Scene {scene_num} (missing audio or image)")
+            continue
+
+        print(f"Rendering clip for Scene {scene_num}...")
+
+        # FFmpeg command: loops image to match audio duration, scales to 1920x1080
+        cmd = [
+            "ffmpeg", "-y",
+            "-loop", "1", "-i", image_file,
+            "-i", audio_file,
+            "-c:v", "libx264", "-tune", "stillimage", "-c:a", "aac",
+            "-b:a", "192k", "-pix_fmt", "yuv420p",
+            "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black",
+            "-shortest", clip_file
+        ]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        valid_clips.append(f"file '{clip_file}'")
+
+    with open(clip_list_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(valid_clips))
+
+    print(f"Stitching {len(valid_clips)} clips into final documentary video...")
