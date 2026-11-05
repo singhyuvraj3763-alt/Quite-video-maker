@@ -29,7 +29,7 @@ def generate_script(topic, num_scenes=24):
         {{
           "scene_number": 1,
           "narration": "Narration text in Hindi for scene 1",
-          "visual_prompt": "Cinematic visual description in English for image generation"
+          "visual_prompt": "Cinematic documentary visual description in English for image generation"
         }}
       ]
     }}
@@ -88,35 +88,7 @@ async def generate_voiceovers():
 
     print("Voiceovers ready in 'audio/' folder!")
 
-# ----------------- STEP 3: VISUALS LOGIC -----------------
-def download_wikimedia_image(query, target_path):
-    headers = {"User-Agent": "DocumentaryBot/1.0 (contact: test@example.com)"}
-    clean_query = urllib.parse.quote(query)
-    search_url = (
-        f"https://commons.wikimedia.org/w/api.php?action=query&generator=search"
-        f"&gsrnamespace=6&gsrsearch={clean_query}&gsrlimit=3&prop=imageinfo"
-        f"&iiprop=url|mime&format=json"
-    )
-
-    try:
-        req = urllib.request.Request(search_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as res:
-            res_data = json.loads(res.read().decode("utf-8"))
-            pages = res_data.get("query", {}).get("pages", {})
-            for _, page in pages.items():
-                image_info = page.get("imageinfo", [{}])[0]
-                img_url = image_info.get("url")
-                mime = image_info.get("mime", "")
-                if img_url and ("jpeg" in mime or "png" in mime or "jpg" in mime):
-                    img_req = urllib.request.Request(img_url, headers=headers)
-                    with urllib.request.urlopen(img_req, timeout=15) as img_res:
-                        with open(target_path, "wb") as out_file:
-                            out_file.write(img_res.read())
-                    return True
-    except Exception as e:
-        print(f"Fetch failed for query '{query}': {e}")
-    return False
-
+# ----------------- STEP 3: VISUALS LOGIC (Pollinations Free AI) -----------------
 def generate_visuals():
     if not os.path.exists("script.json"):
         print("Error: script.json not found!")
@@ -127,25 +99,45 @@ def generate_visuals():
 
     scenes = data.get("scenes", [])
     os.makedirs("images", exist_ok=True)
-    fallback_topics = ["Mahindra", "tractor", "factory", "vintage car", "industrial India", "business office"]
+
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
     for scene in scenes:
         scene_num = scene["scene_number"]
-        prompt = scene.get("visual_prompt", "")
+        prompt = scene.get("visual_prompt", "cinematic historical documentary scene")
         img_path = f"images/scene_{scene_num}.jpg"
 
         if os.path.exists(img_path):
             continue
 
-        print(f"Fetching visual for Scene {scene_num}...")
-        keywords = " ".join(prompt.replace(",", "").split()[:3])
-        success = download_wikimedia_image(keywords, img_path)
+        print(f"Generating cinematic visual for Scene {scene_num}...")
+        encoded_prompt = urllib.parse.quote(f"{prompt}, 4k documentary photograph, dramatic lighting, highly detailed")
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1920&height=1080&nologo=true"
 
-        if not success:
-            fallback = fallback_topics[scene_num % len(fallback_topics)]
-            download_wikimedia_image(fallback, img_path)
+        downloaded = False
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=30) as res:
+                    with open(img_path, "wb") as f_out:
+                        f_out.write(res.read())
+                downloaded = True
+                break
+            except Exception as e:
+                print(f"Attempt {attempt + 1} failed for Scene {scene_num}: {e}")
+                time.sleep(2)
 
-    print("All scene visuals downloaded into 'images/' folder!")
+        if not downloaded:
+            print(f"Generating fallback colored background for Scene {scene_num}...")
+            # Fallback black canvas if network fails
+            fallback_cmd = [
+                "ffmpeg", "-y", "-f", "lavfi",
+                "-i", "color=c=black:s=1920x1080:d=1",
+                "-frames:v", "1", img_path
+            ]
+            subprocess.run(fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    print("All scene visuals ready in 'images/' folder!")
 
 # ----------------- STEP 4: VIDEO RENDERING LOGIC -----------------
 def render_full_video():
@@ -185,6 +177,10 @@ def render_full_video():
         ]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         valid_clips.append(f"file '{clip_file}'")
+
+    if not valid_clips:
+        print("Error: No clips were rendered. Cannot build final video.")
+        sys.exit(1)
 
     with open(clip_list_path, "w", encoding="utf-8") as f:
         f.write("\n".join(valid_clips))
