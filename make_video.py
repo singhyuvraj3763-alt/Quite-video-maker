@@ -106,7 +106,7 @@ if __name__ == "__main__":
         asyncio.run(generate_voiceovers())
 
     elif mode == "video":
-        print("Video mode: script already created. Generating audio voiceovers...")
+        print("Video mode: generating audio voiceovers from existing script...")
         asyncio.run(generate_voiceovers())
 
     else:
