@@ -4,18 +4,17 @@ import json
 import time
 import asyncio
 import edge_tts
-from google import genai
-from google.genai import types
 
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-    print("Error: GEMINI_API_KEY environment variable is missing!")
-    sys.exit(1)
-
-client = genai.Client(api_key=api_key)
-
-# ----------------- STEP 1: SCRIPT LOGIC (Keep this!) -----------------
+# ----------------- STEP 1: SCRIPT LOGIC -----------------
 def generate_script(topic, num_scenes=24):
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        print("Error: GEMINI_API_KEY environment variable is missing!")
+        sys.exit(1)
+
+    from google import genai
+    client = genai.Client(api_key=api_key)
+
     print(f"Generating script for topic: '{topic}' with {num_scenes} scenes...")
     
     prompt = f"""
@@ -58,12 +57,12 @@ def generate_script(topic, num_scenes=24):
             else:
                 raise e
 
-# ----------------- STEP 2: AUDIO LOGIC (Add underneath) -----------------
+# ----------------- STEP 2: AUDIO LOGIC -----------------
 VOICE = "hi-IN-SwaraNeural"
 
 async def generate_voiceovers():
     if not os.path.exists("script.json"):
-        print("Error: script.json not found!")
+        print("Error: script.json not found! Run script generation first.")
         sys.exit(1)
 
     with open("script.json", "r", encoding="utf-8") as f:
@@ -105,6 +104,11 @@ if __name__ == "__main__":
 
     elif mode == "audio":
         asyncio.run(generate_voiceovers())
-        
+
+    elif mode == "video":
+        print("Video mode: script already created. Generating audio voiceovers...")
+        asyncio.run(generate_voiceovers())
+
     else:
         print(f"Unknown mode: {mode}")
+        sys.exit(1)
