@@ -36,7 +36,7 @@ def generate_script(topic, num_scenes=24):
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
-                model='gemini-flash-latest',
+                model='gemini-3.8-flash',
                 contents=prompt,
             )
             text = response.text.strip()
