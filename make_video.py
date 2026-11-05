@@ -1,78 +1,40 @@
 import os
 import sys
 import json
-import time
-from google import genai
-from google.genai import types
+import asyncio
+import edge_tts
 
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-    print("Error: GEMINI_API_KEY environment variable is missing!")
-    sys.exit(1)
+# Voice configuration for Hindi narration
+VOICE = "hi-IN-SwaraNeural"
 
-client = genai.Client(api_key=api_key)
+async def generate_voiceovers():
+    if not os.path.exists("script.json"):
+        print("Error: script.json not found!")
+        sys.exit(1)
 
-def generate_script(topic, num_scenes=24):
-    print(f"Generating script for topic: '{topic}' with {num_scenes} scenes...")
-    
-    prompt = f"""
-    Create a detailed documentary-style video script in Hindi about: {topic}.
-    Provide the output strictly as a valid JSON object with the following structure:
-    {{
-      "title": "Video title in Hindi",
-      "scenes": [
-        {{
-          "scene_number": 1,
-          "narration": "Narration text in Hindi for scene 1",
-          "visual_prompt": "Cinematic visual description in English for image generation"
-        }}
-      ]
-    }}
-    Ensure there are exactly {num_scenes} scenes in the 'scenes' list. Do not include markdown code block formatting like ```json in the output, just raw JSON.
-    """
+    with open("script.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-    # Retry loop to automatically handle temporary 503 capacity spikes
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model='gemini-3.8-flash',
-                contents=prompt,
-            )
-            text = response.text.strip()
-            if text.startswith("```json"):
-                text = text[7:]
-            if text.startswith("```"):
-                text = text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
-            return text.strip()
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed due to server load: {e}")
-            if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 5
-                print(f"Waiting {wait_time} seconds before retrying...")
-                time.sleep(wait_time)
-            else:
-                raise e
+    scenes = data.get("scenes", [])
+    print(f"Found {len(scenes)} scenes to process for voiceover...")
+
+    os.makedirs("audio", exist_ok=True)
+
+    for scene in scenes:
+        scene_num = scene["scene_number"]
+        narration = scene["narration"]
+        audio_path = f"audio/scene_{scene_num}.mp3"
+
+        print(f"Generating audio for Scene {scene_num}...")
+        communicate = edge_tts.Communicate(narration, VOICE)
+        await communicate.save(audio_path)
+
+    print("All scene voiceovers generated successfully inside 'audio/' folder!")
 
 if __name__ == "__main__":
-    mode = sys.argv[1] if len(sys.argv) > 1 else "script"
-    topic = sys.argv[2] if len(sys.argv) > 2 else "The Mahindra story in Hindi"
+    mode = sys.argv[1] if len(sys.argv) > 1 else "audio"
 
-    if mode == "script":
-        script_json_str = generate_script(topic)
-        
-        try:
-            parsed = json.loads(script_json_str)
-        except Exception as e:
-            print("Failed to parse JSON from Gemini response. Raw text was:")
-            print(script_json_str)
-            sys.exit(1)
-            
-        with open("script.json", "w", encoding="utf-8") as f:
-            json.dump(parsed, f, ensure_ascii=False, indent=2)
-            
-        print("script.json successfully created and saved!")
+    if mode == "audio":
+        asyncio.run(generate_voiceovers())
     else:
-        print("Video rendering mode selected.")
+        print(f"Unknown mode: {mode}")
