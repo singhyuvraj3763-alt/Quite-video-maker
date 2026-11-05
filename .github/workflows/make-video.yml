@@ -50,3 +50,15 @@ jobs:
           git add script.json
           git commit -m "Update script" || echo "No changes to commit"
           git push
+
+      - name: Generate Audio Files
+        run: python make_video.py "audio"
+
+      - name: Save audio files to the repo
+        run: |
+          git config --global user.name "video-bot"
+          git config --global user.email "bot@users.noreply.github.com"
+          git pull --rebase
+          git add audio/
+          git diff-index --quiet HEAD || git commit -m "Add generated voiceovers"
+          git push
