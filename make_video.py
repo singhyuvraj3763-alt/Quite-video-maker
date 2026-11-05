@@ -33,7 +33,7 @@ def generate_script(topic, num_scenes=24):
     """
 
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-2.0-flash',
         contents=prompt,
     )
     
