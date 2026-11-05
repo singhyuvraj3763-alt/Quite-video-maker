@@ -43,13 +43,22 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python make_video.py "${{ github.event.inputs.mode }}" "${{ github.event.inputs.topic }}"
+          python make_video.py "${{ github.event.inputs.mode }}" "${{ github.event.inputs.topic }}" "${{ github.event.inputs.scenes }}"
 
-      - name: Save changes to the repo
+      - name: Save assets to repo
         run: |
           git config --global user.name "video-bot"
           git config --global user.email "bot@users.noreply.github.com"
           git pull --rebase
           git add script.json audio/ images/
-          git diff-index --quiet HEAD || git commit -m "Auto-commit audio and visuals"
+          git diff-index --quiet HEAD || git commit -m "Auto-commit generated assets"
           git push
+
+      - name: Upload Final Video
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-documentary-video
+          path: final_documentary.mp4
+          if-no-files-found: warn
+          retention-days: 7
