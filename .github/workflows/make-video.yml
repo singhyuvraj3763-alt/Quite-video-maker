@@ -3,12 +3,8 @@ name: Make video
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: 'Mode (script or video)'
-        required: true
-        default: 'video'
       topic:
-        description: 'Topic for the video'
+        description: 'Enter Video Topic'
         required: true
         default: 'The Mahindra story in Hindi'
       scenes:
@@ -39,26 +35,24 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Python Script
+      - name: Run Full Pipeline
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python make_video.py "${{ github.event.inputs.mode }}" "${{ github.event.inputs.topic }}" "${{ github.event.inputs.scenes }}"
+          python make_video.py "${{ github.event.inputs.topic }}" "${{ github.event.inputs.scenes }}"
 
-      - name: Save assets to repo
+      - name: Save generated script to repository
         run: |
           git config --global user.name "video-bot"
           git config --global user.email "bot@users.noreply.github.com"
           git pull --rebase
-          git add script.json audio/ images/
-          git diff-index --quiet HEAD || git commit -m "Auto-commit generated assets"
+          git add script.json
+          git diff-index --quiet HEAD || git commit -m "Auto-generate script for ${{ github.event.inputs.topic }}"
           git push
 
       - name: Upload Final Video
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: final-documentary-video
           path: final_documentary.mp4
-          if-no-files-found: warn
           retention-days: 7
