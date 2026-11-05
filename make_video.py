@@ -1,226 +1,308 @@
-import os
-import sys
-import json
-import time
-import shutil
+"""
+Quiet Video Maker - Hindi documentary video from a topic.
+
+Usage:
+  python make_video.py full     -> topic -> script -> voice -> video, all in one run
+  python make_video.py script   -> only writes script.json (and out/script.txt) from the topic
+  python make_video.py video    -> reads script.json and renders out/final.mp4
+
+Environment variables:
+  GEMINI_API_KEY (required for "script")
+  TOPIC, SCENES  (for "full" and "script"; if TOPIC is empty, topic.txt is used)
+  GEMINI_MODEL   (optional, default gemini-2.5-flash)
+  VOICE          (optional, default hi-IN-MadhurNeural; female: hi-IN-SwaraNeural)
+  POLLINATIONS_API_KEY (optional but recommended: free key from enter.pollinations.ai)
+"""
 import asyncio
+import io
+import json
+import os
 import subprocess
+import sys
+import time
+from pathlib import Path
+from urllib.parse import quote
+
 import requests
-import edge_tts
+from PIL import Image, ImageDraw
 
-# ----------------- STEP 1: SCRIPT GENERATOR -----------------
-def generate_script(topic, num_scenes=24):
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("Error: GEMINI_API_KEY environment variable is missing!")
-        sys.exit(1)
+FPS = 25
+W, H = 1920, 1080
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+VOICE = os.environ.get("VOICE", "hi-IN-MadhurNeural")
+STYLE = (
+    "cinematic documentary illustration, painterly digital art, muted warm "
+    "color palette, soft dramatic lighting, highly detailed, wide 16:9 "
+    "composition, no text, no letters, no logos, no watermark"
+)
+WORK = Path("work")
+OUT = Path("out")
 
-    from google import genai
-    client = genai.Client(api_key=api_key)
+DISCLAIMER = (
+    "इस वीडियो के कई विज़ुअल्स AI से बनाए गए इलस्ट्रेशन हैं, असली तस्वीरें नहीं। "
+    "यह वीडियो सिर्फ़ शैक्षणिक उद्देश्य के लिए है।"
+)
 
-    print(f"Generating documentary script for: '{topic}' ({num_scenes} scenes)...")
-    
-    prompt = f"""
-    Write an engaging, factual documentary video script in Hindi about: {topic}.
-    Return strictly valid JSON without markdown formatting with this schema:
-    {{
-      "title": "Documentary Title in Hindi",
-      "scenes": [
-        {{
-          "scene_number": 1,
-          "narration": "Hindi narration for scene 1",
-          "visual_prompt": "Specific visual description in English for image generation"
-        }}
-      ]
-    }}
-    Ensure exactly {num_scenes} scenes.
-    """
 
+# ---------------------------------------------------------------- script ----
+def gemini_script(topic: str, n_scenes: int) -> dict:
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        sys.exit("GEMINI_API_KEY is missing. Add it in Settings > Secrets > Actions.")
+
+    prompt = (
+        "You are a documentary writer for a calm, well-researched Hindi YouTube "
+        "channel that tells business and history stories as stories.\n"
+        "Topic: " + topic + "\n"
+        "Write a documentary script with exactly " + str(n_scenes) + " scenes.\n"
+        "Rules:\n"
+        "- narration: natural spoken Hindi in Devanagari, calm storytelling tone, "
+        "45-60 words per scene, no bullet points, no stage directions.\n"
+        "- Scene 1 must be a strong hook. Then tell the story in chronological "
+        "order with clear turning points, and end with what it means today.\n"
+        "- Use only facts you are highly confident about. If you are unsure of a "
+        "date, number or name, leave it out or speak generally. Never invent "
+        "quotes, people or events.\n"
+        "- image_prompt: English, one vivid illustration description per scene "
+        "(setting, mood, objects, era-appropriate details). No text, no logos, "
+        "no real people's faces.\n"
+        "- chapter: short English chapter title. Scenes in the same chapter share "
+        "exactly the same title. Use 6 to 8 chapters in total.\n"
+        "Return JSON only in this shape:\n"
+        '{"title": "Hindi video title", "description": "2-3 sentence Hindi '
+        'description", "scenes": [{"chapter": "", "narration": "", '
+        '"image_prompt": ""}]}'
+    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": 0.8,
+            "maxOutputTokens": 32000,
+        },
+    }
+    for attempt in range(4):
+        try:
+            r = requests.post(
+                url,
+                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+                json=body,
+                timeout=300,
+            )
+            if r.status_code == 200:
+                parts = r.json()["candidates"][0]["content"]["parts"]
+                text = "".join(p.get("text", "") for p in parts)
+                data = json.loads(text)
+                assert data["scenes"] and all(
+                    {"chapter", "narration", "image_prompt"} <= set(s) for s in data["scenes"]
+                )
+                return data
+            print("Gemini error", r.status_code, r.text[:400])
+        except Exception as e:  # noqa: BLE001
+            print("Script attempt failed:", repr(e))
+        time.sleep(10 * (attempt + 1))
+    sys.exit("Could not get a valid script from Gemini. Check the key or model name.")
+
+
+# ---------------------------------------------------------------- images ----
+def placeholder(path: Path, seed: int) -> None:
+    img = Image.new("RGB", (W, H))
+    d = ImageDraw.Draw(img)
+    base = 25 + (seed * 17) % 40
+    for y in range(H):
+        c = int(base + 40 * y / H)
+        d.line([(0, y), (W, y)], fill=(c, c - 5, c + 10))
+    img.save(path, quality=90)
+
+
+def make_image(prompt: str, path: Path, seed: int) -> bool:
+    """Free Pollinations image. With a free API key: no watermark, higher limits.
+    Without a key the anonymous tier allows ~1 image per 15 seconds and adds a
+    watermark, so we wait between requests and crop the watermark off."""
+    full = f"{prompt}, {STYLE}"
+    key = os.environ.get("POLLINATIONS_API_KEY", "").strip()
+    if key:
+        url = "https://gen.pollinations.ai/image/" + quote(full)
+        params = {"width": W, "height": H, "seed": seed, "key": key}
+    else:
+        url = "https://image.pollinations.ai/prompt/" + quote(full)
+        params = {"width": W, "height": H, "nologo": "true", "seed": seed, "model": "flux"}
     for attempt in range(5):
         try:
-            response = client.models.generate_content(
-                model='gemini-flash-latest',
-                contents=prompt,
-            )
-            raw = response.text.strip()
-            if raw.startswith("```json"):
-                raw = raw[7:]
-            if raw.startswith("```"):
-                raw = raw[3:]
-            if raw.endswith("```"):
-                raw = raw[:-3]
-            return raw.strip()
-        except Exception as e:
-            print(f"Gemini attempt {attempt + 1} failed: {e}")
-            time.sleep((attempt + 1) * 4)
+            r = requests.get(url, params=params, timeout=180)
+            ctype = r.headers.get("content-type", "")
+            if r.status_code == 200 and ctype.startswith("image") and len(r.content) > 10000:
+                img = Image.open(io.BytesIO(r.content)).convert("RGB")
+                if not key:  # remove the corner watermark: crop 6% and scale back up
+                    cw, ch = img.size
+                    img = img.crop((0, 0, int(cw * 0.94), int(ch * 0.94)))
+                img.resize((W, H), Image.LANCZOS).save(path, quality=92)
+                return True
+            print("Image problem", r.status_code, ctype, flush=True)
+        except Exception as e:  # noqa: BLE001
+            print("Image attempt failed:", repr(e), flush=True)
+        time.sleep(16 * (attempt + 1))
+    placeholder(path, seed)
+    return False
 
-    raise RuntimeError("Failed to generate script from Gemini API.")
 
-# ----------------- STEP 2: VOICEOVER GENERATOR -----------------
-VOICE = "hi-IN-SwaraNeural"
+# ----------------------------------------------------------------- voice ----
+async def _edge(text: str, path: Path) -> None:
+    import edge_tts
 
-async def generate_voiceovers(scenes):
-    os.makedirs("audio", exist_ok=True)
-    print(f"Generating voiceovers for {len(scenes)} scenes...")
+    await edge_tts.Communicate(text, VOICE, rate="-8%").save(str(path))
 
-    for scene in scenes:
-        scene_num = scene["scene_number"]
-        narration = scene["narration"]
-        audio_path = f"audio/scene_{scene_num}.mp3"
 
-        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
-            continue
+def speak(text: str, path: Path) -> None:
+    try:
+        asyncio.run(_edge(text, path))
+        if path.exists() and path.stat().st_size > 1000:
+            return
+    except Exception as e:  # noqa: BLE001
+        print("Edge-TTS failed, using gTTS fallback:", repr(e))
+    from gtts import gTTS
 
-        print(f"Recording narration for Scene {scene_num}...")
-        communicate = edge_tts.Communicate(narration, VOICE)
-        await communicate.save(audio_path)
+    gTTS(text, lang="hi").save(str(path))
 
-    print("All voiceovers ready!")
 
-# ----------------- STEP 3: VISUALS GENERATOR (NO WATERMARK) -----------------
-def generate_visuals(scenes):
-    os.makedirs("images", exist_ok=True)
-    print(f"Generating visuals for {len(scenes)} scenes...")
+def audio_duration(path: Path) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    return float(out)
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
 
-    for scene in scenes:
-        scene_num = scene["scene_number"]
-        v_prompt = scene.get("visual_prompt", "documentary photograph cinematic lighting")
-        img_path = f"images/scene_{scene_num}.jpg"
-
-        if os.path.exists(img_path) and os.path.getsize(img_path) > 5000:
-            continue
-
-        print(f"Generating visual for Scene {scene_num}...")
-        
-        # Clean query: strip non-alphanumeric chars
-        clean_words = "".join([c for c in v_prompt if c.isalnum() or c.isspace()])
-        keywords = " ".join(clean_words.split()[:8])
-        query = requests.utils.quote(f"{keywords}, 8k documentary cinematography, sharp focus, historical realism")
-        
-        # Pollinations with nologo=true (removes watermark) and seed for uniqueness
-        seed = 2000 + scene_num
-        ai_url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){query}?width=1280&height=720&seed={seed}&nologo=true&model=flux"
-
-        downloaded = False
-        for _ in range(3):
-            try:
-                res = requests.get(ai_url, headers=headers, timeout=25)
-                if res.status_code == 200 and len(res.content) > 8000:
-                    with open(img_path, "wb") as f_out:
-                        f_out.write(res.content)
-                    downloaded = True
-                    break
-            except Exception:
-                time.sleep(2)
-
-        # Fail-safe: If AI generation hits timeout, generate a clean cinematic slate
-        if not downloaded:
-            prev_img = f"images/scene_{scene_num - 1}.jpg"
-            if os.path.exists(prev_img) and os.path.getsize(prev_img) > 5000:
-                shutil.copy(prev_img, img_path)
-            else:
-                # Generate a high-contrast cinematic slate so screen is never black
-                cmd = [
-                    "ffmpeg", "-y", "-f", "lavfi",
-                    "-i", "color=c=#141e30:s=1280x720:d=1",
-                    "-frames:v", "1", img_path
-                ]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    print("All visuals ready without watermarks!")
-
-# ----------------- STEP 4: VIDEO COMPOSITING & STITCHING -----------------
-def render_full_video(scenes):
-    os.makedirs("temp_clips", exist_ok=True)
-    clip_list_path = "clips.txt"
-    valid_clips = []
-
-    print(f"Rendering {len(scenes)} clips into final documentary...")
-
-    for scene in scenes:
-        scene_num = scene["scene_number"]
-        audio_file = f"audio/scene_{scene_num}.mp3"
-        image_file = f"images/scene_{scene_num}.jpg"
-        clip_file = f"temp_clips/clip_{scene_num}.mp4"
-
-        if not os.path.exists(audio_file) or not os.path.exists(image_file):
-            continue
-
-        print(f"Encoding Scene {scene_num}...")
-
-        # Probe duration of narration
-        probe_cmd = [
-            "ffprobe", "-v", "error", "-show_entries",
-            "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audio_file
-        ]
-        duration_res = subprocess.run(probe_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        try:
-            duration = float(duration_res.stdout.strip())
-        except Exception:
-            duration = 10.0
-
-        # Encode clip matching exact audio length with scale and pad protection
-        cmd = [
-            "ffmpeg", "-y",
-            "-loop", "1", "-i", image_file,
-            "-i", audio_file,
-            "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k",
-            "-t", str(duration),
-            "-shortest", clip_file
-        ]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        valid_clips.append(f"file '{clip_file}'")
-
-    if not valid_clips:
-        print("Error: No clips rendered.")
-        sys.exit(1)
-
-    with open(clip_list_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(valid_clips))
-
-    final_output = "final_documentary.mp4"
-    print("Stitching clips into final_documentary.mp4...")
-    concat_cmd = [
-        "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", clip_list_path,
-        "-c", "copy",
-        final_output
+# ----------------------------------------------------------------- video ----
+def motion(i: int, frames: int) -> str:
+    """Slow Ken Burns motion, alternating between 4 styles."""
+    f = frames
+    centre_x = "iw/2-(iw/zoom/2)"
+    centre_y = "ih/2-(ih/zoom/2)"
+    styles = [
+        (f"1+0.15*on/{f}", centre_x, centre_y),               # zoom in
+        (f"1.15-0.15*on/{f}", centre_x, centre_y),            # zoom out
+        ("1.12", f"(iw-iw/zoom)*on/{f}", centre_y),           # pan left -> right
+        ("1.12", f"(iw-iw/zoom)*(1-on/{f})", centre_y),       # pan right -> left
     ]
-    subprocess.run(concat_cmd, check=True)
-    print(f"Finished! Output ready: {final_output}")
+    z, x, y = styles[i % 4]
+    return (
+        f"scale=3840:2160:flags=lanczos,"
+        f"zoompan=z='{z}':x='{x}':y='{y}':d={f}:s={W}x{H}:fps={FPS},"
+        f"format=yuv420p"
+    )
 
-# ----------------- MAIN PIPELINE ENTRYPOINT -----------------
+
+def render_clip(img: Path, aud: Path, clip: Path, i: int, dur: float) -> None:
+    frames = int(dur * FPS)
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", str(img), "-i", str(aud),
+        "-vf", motion(i, frames),
+        "-af", "apad",
+        "-t", f"{dur:.3f}",
+        "-r", str(FPS),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "160k",
+        str(clip),
+    ]
+    subprocess.run(cmd, check=True)
+
+
+def stamp(seconds: float) -> str:
+    s = int(seconds)
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def build_video(data: dict) -> None:
+    WORK.mkdir(exist_ok=True)
+    OUT.mkdir(exist_ok=True)
+    clips, chapters = [], []
+    t, last, fails = 0.0, None, 0
+    scenes = data["scenes"]
+
+    for i, sc in enumerate(scenes):
+        print(f"--- Scene {i + 1}/{len(scenes)} ---", flush=True)
+        img = WORK / f"img_{i:03d}.jpg"
+        aud = WORK / f"aud_{i:03d}.mp3"
+        clip = WORK / f"clip_{i:03d}.mp4"
+        if not make_image(sc["image_prompt"], img, seed=1000 + i):
+            fails += 1
+            if fails >= 3:
+                sys.exit(
+                    "Stopping: 3 images failed (the free image service is limiting "
+                    "requests). Add a free POLLINATIONS_API_KEY secret and run again."
+                )
+        speak(sc["narration"], aud)
+        dur = audio_duration(aud) + 0.6
+        render_clip(img, aud, clip, i, dur)
+        if sc["chapter"] != last:
+            chapters.append((t, sc["chapter"]))
+            last = sc["chapter"]
+        t += dur
+        clips.append(clip)
+        # anonymous Pollinations allows about 1 image per 15 seconds
+        time.sleep(1 if os.environ.get("POLLINATIONS_API_KEY", "").strip() else 16)
+
+    if fails == len(scenes):
+        sys.exit("Every image failed to generate. The image service may be down.")
+    if fails:
+        print(f"WARNING: {fails} scene(s) used a plain placeholder image.")
+
+    listfile = WORK / "list.txt"
+    listfile.write_text("".join(f"file '{c.resolve()}'\n" for c in clips))
+    final = OUT / "final.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+         "-i", str(listfile), "-c", "copy", str(final)],
+        check=True,
+    )
+
+    lines = [data.get("title", ""), "", data.get("description", ""), "", "CHAPTERS"]
+    for k, (ts, name) in enumerate(chapters):
+        lines.append(f"{stamp(0 if k == 0 else ts)} {name}")
+    lines += ["", "SOURCES", "[Add your real sources here]", "", DISCLAIMER]
+    (OUT / "description.txt").write_text("\n".join(lines), encoding="utf-8")
+    print(f"Done. Video length about {stamp(t)}. Saved to {final}")
+
+
+# ------------------------------------------------------------------ main ----
+def write_script_files(data: dict) -> None:
+    Path("script.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    OUT.mkdir(exist_ok=True)
+    (OUT / "script.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    readable = [data.get("title", ""), ""]
+    for i, sc in enumerate(data["scenes"], 1):
+        readable += [f"[{i}] ({sc['chapter']})", sc["narration"], ""]
+    (OUT / "script.txt").write_text("\n".join(readable), encoding="utf-8")
+
+
+def get_topic() -> str:
+    topic = os.environ.get("TOPIC", "").strip()
+    if not topic and Path("topic.txt").exists():
+        topic = Path("topic.txt").read_text(encoding="utf-8").strip()
+    if not topic:
+        sys.exit("No topic. Type one in the Run workflow box or put it in topic.txt.")
+    return topic
+
+
+def main() -> None:
+    mode = sys.argv[1] if len(sys.argv) > 1 else "full"
+    if mode in ("script", "full"):
+        n = int(os.environ.get("SCENES", "24") or 24)
+        data = gemini_script(get_topic(), n)
+        write_script_files(data)
+        print("Script saved.", flush=True)
+        if mode == "full":
+            build_video(data)
+    else:  # "video": render from the saved (and possibly hand-corrected) script.json
+        p = Path("script.json")
+        if not p.exists():
+            sys.exit("script.json not found. Run in 'script' or 'full' mode first.")
+        build_video(json.loads(p.read_text(encoding="utf-8")))
+
+
 if __name__ == "__main__":
-    topic = sys.argv[1] if len(sys.argv) > 1 else "The Mahindra story in Hindi"
-    num_scenes = int(sys.argv[2]) if len(sys.argv) > 2 else 24
-
-    # 1. Wipe previous caches so old topics never mix with new topics
-    for folder in ["audio", "images", "temp_clips"]:
-        if os.path.exists(folder):
-            shutil.rmtree(folder)
-    if os.path.exists("final_documentary.mp4"):
-        os.remove("final_documentary.mp4")
-
-    # 2. Step 1: Script
-    script_raw = generate_script(topic, num_scenes=num_scenes)
-    data = json.loads(script_raw)
-    with open("script.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-    scenes = data.get("scenes", [])
-
-    # 3. Step 2: Audio
-    asyncio.run(generate_voiceovers(scenes))
-
-    # 4. Step 3: Visuals
-    generate_visuals(scenes)
-
-    # 5. Step 4: Stitch Final MP4
-    render_full_video(scenes)
+    main()
