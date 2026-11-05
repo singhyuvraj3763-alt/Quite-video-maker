@@ -1,11 +1,10 @@
 import os
 import sys
 import json
-import asyncio
+import time
 from google import genai
 from google.genai import types
 
-# Initialize Gemini Client using the repository secret
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
     print("Error: GEMINI_API_KEY environment variable is missing!")
@@ -32,21 +31,30 @@ def generate_script(topic, num_scenes=24):
     Ensure there are exactly {num_scenes} scenes in the 'scenes' list. Do not include markdown code block formatting like ```json in the output, just raw JSON.
     """
 
-    response = client.models.generate_content(
-        model='gemini-flash-latest',
-        contents=prompt,
-    )
-    
-    text = response.text.strip()
-    # Clean up markdown if the model added it
-    if text.startswith("```json"):
-        text = text[7:]
-    if text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-        
-    return text.strip()
+    # Retry loop to automatically handle temporary 503 capacity spikes
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model='gemini-flash-latest',
+                contents=prompt,
+            )
+            text = response.text.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            return text.strip()
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed due to server load: {e}")
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 5
+                print(f"Waiting {wait_time} seconds before retrying...")
+                time.sleep(wait_time)
+            else:
+                raise e
 
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "script"
@@ -55,7 +63,6 @@ if __name__ == "__main__":
     if mode == "script":
         script_json_str = generate_script(topic)
         
-        # Validate that it's proper JSON before saving
         try:
             parsed = json.loads(script_json_str)
         except Exception as e:
@@ -63,11 +70,9 @@ if __name__ == "__main__":
             print(script_json_str)
             sys.exit(1)
             
-        # Save explicitly to script.json so GitHub Actions can commit it
         with open("script.json", "w", encoding="utf-8") as f:
             json.dump(parsed, f, ensure_ascii=False, indent=2)
             
         print("script.json successfully created and saved!")
     else:
         print("Video rendering mode selected.")
-      
