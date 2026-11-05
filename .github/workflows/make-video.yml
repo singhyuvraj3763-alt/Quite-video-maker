@@ -1,0 +1,63 @@
+name: Make video
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "script = write the script first. video = render the video from script.json"
+        type: choice
+        options:
+          - script
+          - video
+        default: script
+      topic:
+        description: "Topic (only needed in script mode), e.g. The Mahindra story"
+        type: string
+        required: false
+      scenes:
+        description: "Number of scenes (24 is about 8-10 minutes)"
+        type: string
+        default: "24"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install Python packages
+        run: pip install -r requirements.txt
+
+      - name: Run
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TOPIC: ${{ inputs.topic }}
+          SCENES: ${{ inputs.scenes }}
+          MODE: ${{ inputs.mode }}
+        run: python make_video.py "$MODE"
+
+      - name: Save script.json to the repo
+        if: ${{ inputs.mode == 'script' }}
+        run: |
+          git config user.name "video-bot"
+          git config user.email "video-bot@users.noreply.github.com"
+          git add script.json
+          git commit -m "Update script" || echo "No changes to commit"
+          git push
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ inputs.mode }}
+          path: out/
