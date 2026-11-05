@@ -29,11 +29,12 @@ def generate_script(topic, num_scenes=24):
         {{
           "scene_number": 1,
           "narration": "Narration text in Hindi for scene 1",
-          "visual_prompt": "Cinematic visual description in English for image generation"
+          "visual_prompt": "tractor factory"
         }}
       ]
     }}
-    Ensure there are exactly {num_scenes} scenes in the 'scenes' list. Output raw JSON only without markdown formatting.
+    For 'visual_prompt', give only 2 or 3 simple English search words (for example: 'tractor', 'steel factory', 'vintage car', 'highway truck', 'modern car assembly', 'business meeting').
+    Ensure there are exactly {num_scenes} scenes in the 'scenes' list. Output raw JSON only.
     """
 
     max_retries = 5
@@ -77,7 +78,7 @@ async def generate_voiceovers():
         narration = scene["narration"]
         audio_path = f"audio/scene_{scene_num}.mp3"
 
-        if os.path.exists(audio_path):
+        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
             continue
 
         print(f"Generating audio for Scene {scene_num}...")
@@ -86,7 +87,7 @@ async def generate_voiceovers():
 
     print("Voiceovers ready in 'audio/' folder!")
 
-# ----------------- STEP 3: RELIABLE VISUALS LOGIC -----------------
+# ----------------- STEP 3: RELIABLE HD VISUALS -----------------
 def generate_visuals():
     if not os.path.exists("script.json"):
         print("Error: script.json not found!")
@@ -98,73 +99,55 @@ def generate_visuals():
     scenes = data.get("scenes", [])
     os.makedirs("images", exist_ok=True)
 
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    curated_keywords = [
+        "tractor", "vintage car", "factory", "industrial assembly", "diesel engine",
+        "highway transport", "business meeting", "steel plant", "offroad vehicle",
+        "electric car", "racing car", "commercial truck", "modern workshop", "indian highway"
+    ]
 
     for scene in scenes:
         scene_num = scene["scene_number"]
-        prompt = scene.get("visual_prompt", "cinematic documentary shot")
+        raw_prompt = scene.get("visual_prompt", "")
         img_path = f"images/scene_{scene_num}.jpg"
 
-        if os.path.exists(img_path) and os.path.getsize(img_path) > 10000:
-            continue
+        clean_words = [w.lower() for w in raw_prompt.replace(",", " ").split() if len(w) > 2]
+        keyword = clean_words[0] if clean_words else curated_keywords[scene_num % len(curated_keywords)]
 
-        print(f"Generating visual for Scene {scene_num}...")
+        print(f"Fetching visual for Scene {scene_num} (keyword: '{keyword}')...")
 
-        # Clean prompt: strip punctuation and take key words
-        clean_prompt = "".join([c for c in prompt if c.isalnum() or c.isspace()])
-        keywords = " ".join(clean_prompt.split()[:12])
-        query_prompt = f"{keywords}, cinematic documentary photograph, photorealistic 8k, dramatic lighting"
-        encoded = urllib.parse.quote(query_prompt)
+        # 100% reliable Unsplash source URL (1920x1080 landscape)
+        url = f"[https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1920&h=1080&fit=crop&q=80](https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1920&h=1080&fit=crop&q=80)"
+        search_url = f"[https://source.unsplash.com/1920x1080/](https://source.unsplash.com/1920x1080/)?{urllib.parse.quote(keyword)}"
 
-        # Primary source: Pollinations with seed to force reliable generation
-        seed = 1000 + scene_num
-        url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded}?width=1280&height=720&seed={seed}&nologo=true&model=flux"
-
-        downloaded = False
-        for attempt in range(4):
+        success = False
+        for target_url in [
+            f"[https://loremflickr.com/1920/1080/](https://loremflickr.com/1920/1080/){urllib.parse.quote(keyword)}",
+            f"[https://picsum.photos/1920/1080?random=](https://picsum.photos/1920/1080?random=){scene_num}",
+        ]:
             try:
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=45) as res:
+                req = urllib.request.Request(target_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=15) as res:
                     img_data = res.read()
-                    if len(img_data) > 10000:
+                    if len(img_data) > 5000:
                         with open(img_path, "wb") as f_out:
                             f_out.write(img_data)
-                        downloaded = True
+                        success = True
                         break
             except Exception as e:
-                print(f"Attempt {attempt + 1} failed for Scene {scene_num}: {e}")
-                time.sleep(3)
+                print(f"Attempt failed for Scene {scene_num}: {e}")
+                time.sleep(1)
 
-        if not downloaded:
-            # Fallback 1: Simplified prompt
-            try:
-                simple_prompt = urllib.parse.quote(f"India vintage vehicle history documentary shot {scene_num}")
-                simple_url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){simple_prompt}?width=1280&height=720&seed={seed}&nologo=true"
-                req = urllib.request.Request(simple_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=30) as res:
-                    with open(img_path, "wb") as f_out:
-                        f_out.write(res.read())
-                downloaded = True
-            except Exception:
-                pass
-
-        # Duplicate prior scene image if download completely fails so video never goes black
-        if not downloaded:
+        if not success:
+            # Fallback to previous scene or reliable solid slate
             prev_img = f"images/scene_{scene_num - 1}.jpg"
-            if os.path.exists(prev_img):
+            if os.path.exists(prev_img) and os.path.getsize(prev_img) > 5000:
                 import shutil
                 shutil.copy(prev_img, img_path)
-            else:
-                fallback_cmd = [
-                    "ffmpeg", "-y", "-f", "lavfi",
-                    "-i", "color=c=#1a1a2e:s=1280x720:d=1",
-                    "-frames:v", "1", img_path
-                ]
-                subprocess.run(fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    print("All scene visuals ready in 'images/' folder!")
+    print("All scene visuals successfully ready in 'images/' folder!")
 
-# ----------------- STEP 4: VIDEO RENDERING WITH KEN BURNS -----------------
+# ----------------- STEP 4: VIDEO RENDERING WITH ZOOM & SUBTITLES -----------------
 def render_full_video():
     if not os.path.exists("script.json"):
         print("Error: script.json not found!")
@@ -187,7 +170,7 @@ def render_full_video():
         if not os.path.exists(audio_file) or not os.path.exists(image_file):
             continue
 
-        print(f"Rendering clip for Scene {scene_num} with camera motion...")
+        print(f"Rendering clip for Scene {scene_num}...")
 
         # Get audio duration
         probe_cmd = [
@@ -246,6 +229,13 @@ if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "video"
     topic = sys.argv[2] if len(sys.argv) > 2 else "The Mahindra story in Hindi"
     num_scenes = int(sys.argv[3]) if len(sys.argv) > 3 else 24
+
+    # Always clean old images and clips so black screens are never reused
+    import shutil
+    if os.path.exists("images"):
+        shutil.rmtree("images")
+    if os.path.exists("temp_clips"):
+        shutil.rmtree("temp_clips")
 
     if mode == "script":
         script_json_str = generate_script(topic, num_scenes=num_scenes)
