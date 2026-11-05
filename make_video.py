@@ -29,11 +29,11 @@ def generate_script(topic, num_scenes=24):
         {{
           "scene_number": 1,
           "narration": "Narration text in Hindi for scene 1",
-          "visual_prompt": "Cinematic documentary visual description in English for image generation"
+          "visual_prompt": "Cinematic visual description in English for image generation"
         }}
       ]
     }}
-    Ensure there are exactly {num_scenes} scenes in the 'scenes' list. Do not include markdown code block formatting like ```json in the output, just raw JSON.
+    Ensure there are exactly {num_scenes} scenes in the 'scenes' list. Output raw JSON only without markdown formatting.
     """
 
     max_retries = 5
@@ -52,11 +52,9 @@ def generate_script(topic, num_scenes=24):
                 text = text[:-3]
             return text.strip()
         except Exception as e:
-            print(f"Attempt {attempt + 1} failed due to server load: {e}")
+            print(f"Attempt {attempt + 1} failed: {e}")
             if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 5
-                print(f"Waiting {wait_time} seconds before retrying...")
-                time.sleep(wait_time)
+                time.sleep((attempt + 1) * 5)
             else:
                 raise e
 
@@ -88,7 +86,7 @@ async def generate_voiceovers():
 
     print("Voiceovers ready in 'audio/' folder!")
 
-# ----------------- STEP 3: VISUALS LOGIC (Pollinations Free AI) -----------------
+# ----------------- STEP 3: RELIABLE VISUALS LOGIC -----------------
 def generate_visuals():
     if not os.path.exists("script.json"):
         print("Error: script.json not found!")
@@ -100,46 +98,73 @@ def generate_visuals():
     scenes = data.get("scenes", [])
     os.makedirs("images", exist_ok=True)
 
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     for scene in scenes:
         scene_num = scene["scene_number"]
-        prompt = scene.get("visual_prompt", "cinematic historical documentary scene")
+        prompt = scene.get("visual_prompt", "cinematic documentary shot")
         img_path = f"images/scene_{scene_num}.jpg"
 
-        if os.path.exists(img_path):
+        if os.path.exists(img_path) and os.path.getsize(img_path) > 10000:
             continue
 
-        print(f"Generating cinematic visual for Scene {scene_num}...")
-        encoded_prompt = urllib.parse.quote(f"{prompt}, 4k documentary photograph, dramatic lighting, highly detailed")
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1920&height=1080&nologo=true"
+        print(f"Generating visual for Scene {scene_num}...")
+
+        # Clean prompt: strip punctuation and take key words
+        clean_prompt = "".join([c for c in prompt if c.isalnum() or c.isspace()])
+        keywords = " ".join(clean_prompt.split()[:12])
+        query_prompt = f"{keywords}, cinematic documentary photograph, photorealistic 8k, dramatic lighting"
+        encoded = urllib.parse.quote(query_prompt)
+
+        # Primary source: Pollinations with seed to force reliable generation
+        seed = 1000 + scene_num
+        url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded}?width=1280&height=720&seed={seed}&nologo=true&model=flux"
 
         downloaded = False
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=45) as res:
+                    img_data = res.read()
+                    if len(img_data) > 10000:
+                        with open(img_path, "wb") as f_out:
+                            f_out.write(img_data)
+                        downloaded = True
+                        break
+            except Exception as e:
+                print(f"Attempt {attempt + 1} failed for Scene {scene_num}: {e}")
+                time.sleep(3)
+
+        if not downloaded:
+            # Fallback 1: Simplified prompt
+            try:
+                simple_prompt = urllib.parse.quote(f"India vintage vehicle history documentary shot {scene_num}")
+                simple_url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){simple_prompt}?width=1280&height=720&seed={seed}&nologo=true"
+                req = urllib.request.Request(simple_url, headers=headers)
                 with urllib.request.urlopen(req, timeout=30) as res:
                     with open(img_path, "wb") as f_out:
                         f_out.write(res.read())
                 downloaded = True
-                break
-            except Exception as e:
-                print(f"Attempt {attempt + 1} failed for Scene {scene_num}: {e}")
-                time.sleep(2)
+            except Exception:
+                pass
 
+        # Duplicate prior scene image if download completely fails so video never goes black
         if not downloaded:
-            print(f"Generating fallback colored background for Scene {scene_num}...")
-            # Fallback black canvas if network fails
-            fallback_cmd = [
-                "ffmpeg", "-y", "-f", "lavfi",
-                "-i", "color=c=black:s=1920x1080:d=1",
-                "-frames:v", "1", img_path
-            ]
-            subprocess.run(fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            prev_img = f"images/scene_{scene_num - 1}.jpg"
+            if os.path.exists(prev_img):
+                import shutil
+                shutil.copy(prev_img, img_path)
+            else:
+                fallback_cmd = [
+                    "ffmpeg", "-y", "-f", "lavfi",
+                    "-i", "color=c=#1a1a2e:s=1280x720:d=1",
+                    "-frames:v", "1", img_path
+                ]
+                subprocess.run(fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     print("All scene visuals ready in 'images/' folder!")
 
-# ----------------- STEP 4: VIDEO RENDERING LOGIC -----------------
+# ----------------- STEP 4: VIDEO RENDERING WITH KEN BURNS -----------------
 def render_full_video():
     if not os.path.exists("script.json"):
         print("Error: script.json not found!")
@@ -151,7 +176,6 @@ def render_full_video():
     scenes = data.get("scenes", [])
     os.makedirs("temp_clips", exist_ok=True)
     clip_list_path = "clips.txt"
-
     valid_clips = []
 
     for scene in scenes:
@@ -161,25 +185,45 @@ def render_full_video():
         clip_file = f"temp_clips/clip_{scene_num}.mp4"
 
         if not os.path.exists(audio_file) or not os.path.exists(image_file):
-            print(f"Skipping Scene {scene_num} (missing audio or image)")
             continue
 
-        print(f"Rendering clip for Scene {scene_num}...")
+        print(f"Rendering clip for Scene {scene_num} with camera motion...")
+
+        # Get audio duration
+        probe_cmd = [
+            "ffprobe", "-v", "error", "-show_entries",
+            "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audio_file
+        ]
+        duration_res = subprocess.run(probe_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        try:
+            duration = float(duration_res.stdout.strip())
+        except Exception:
+            duration = 10.0
+
+        total_frames = int(duration * 25)
+
+        # Smooth Ken Burns zoom effect
+        zoom_filter = (
+            f"scale=1920:1080:force_original_aspect_ratio=increase,"
+            f"crop=1920:1080,"
+            f"zoompan=z='min(zoom+0.0010,1.15)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080:fps=25"
+        )
 
         cmd = [
             "ffmpeg", "-y",
             "-loop", "1", "-i", image_file,
             "-i", audio_file,
-            "-c:v", "libx264", "-tune", "stillimage", "-c:a", "aac",
-            "-b:a", "192k", "-pix_fmt", "yuv420p",
-            "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black",
+            "-vf", zoom_filter,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            "-t", str(duration),
             "-shortest", clip_file
         ]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         valid_clips.append(f"file '{clip_file}'")
 
     if not valid_clips:
-        print("Error: No clips were rendered. Cannot build final video.")
+        print("Error: No clips rendered.")
         sys.exit(1)
 
     with open(clip_list_path, "w", encoding="utf-8") as f:
@@ -199,7 +243,7 @@ def render_full_video():
 
 # ----------------- MAIN DISPATCHER -----------------
 if __name__ == "__main__":
-    mode = sys.argv[1] if len(sys.argv) > 1 else "script"
+    mode = sys.argv[1] if len(sys.argv) > 1 else "video"
     topic = sys.argv[2] if len(sys.argv) > 2 else "The Mahindra story in Hindi"
     num_scenes = int(sys.argv[3]) if len(sys.argv) > 3 else 24
 
@@ -209,7 +253,6 @@ if __name__ == "__main__":
             parsed = json.loads(script_json_str)
         except Exception as e:
             print("Failed to parse JSON:", e)
-            print("Raw text:", script_json_str)
             sys.exit(1)
             
         with open("script.json", "w", encoding="utf-8") as f:
