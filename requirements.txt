@@ -1,5 +1,6 @@
+google-genai
 requests
-edge-tts
+pillow
 gTTS
-Pillow
-
+edge-tts
+tabulate
