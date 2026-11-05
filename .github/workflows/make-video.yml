@@ -4,34 +4,31 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "script = write the script first. video = render the video from script.json"
-        type: choice
-        options:
-          - script
-          - video
-        default: script
+        description: 'Mode (script or video)'
+        required: true
+        default: 'script'
       topic:
-        description: "Topic (only needed in script mode), e.g. The Mahindra story"
-        type: string
-        required: false
+        description: 'Topic for the video'
+        required: true
+        default: 'The Mahindra story in Hindi'
       scenes:
-        description: "Number of scenes (24 is about 8-10 minutes)"
-        type: string
-        default: "24"
-
-permissions:
-  contents: write
+        description: 'Number of scenes'
+        required: true
+        default: '24'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
@@ -39,25 +36,18 @@ jobs:
       - name: Install Python packages
         run: pip install -r requirements.txt
 
-      - name: Run
+      - name: Run Python Script
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TOPIC: ${{ inputs.topic }}
-          SCENES: ${{ inputs.scenes }}
-          MODE: ${{ inputs.mode }}
-        run: python make_video.py "$MODE"
+        run: |
+          python make_video.py "${{ github.event.inputs.mode }}" "${{ github.event.inputs.topic }}" || { echo "Python script failed!"; exit 1; }
 
       - name: Save script.json to the repo
-        if: ${{ inputs.mode == 'script' }}
+        if: github.event.inputs.mode == 'script'
         run: |
-          git config user.name "video-bot"
-          git config user.email "video-bot@users.noreply.github.com"
+          git config --global user.name "video-bot"
+          git config --global user.email "video-bot@users.noreply.github.com"
           git add script.json
           git commit -m "Update script" || echo "No changes to commit"
           git push
-
-      - name: Upload results
-        uses: actions/upload-artifact@v4
-        with:
-          name: results-${{ inputs.mode }}
-          path: out/
+          
