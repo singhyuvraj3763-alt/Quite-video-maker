@@ -43,7 +43,36 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Install Python packages
-        run: pip install -r requirements.txt
+        run: pip install requests edge-tts gTTS Pillow
+
+      - name: Preflight check (fails early with a clear message)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+          MODE: ${{ inputs.mode || 'full' }}
+        run: |
+          python - <<'PY'
+          import importlib, os, shutil, sys
+          problems = []
+          for mod in ("requests", "edge_tts", "gtts", "PIL"):
+              try:
+                  importlib.import_module(mod)
+              except Exception as e:
+                  problems.append(f"Python package missing: {mod} ({e})")
+          for tool in ("ffmpeg", "ffprobe"):
+              if not shutil.which(tool):
+                  problems.append(f"{tool} is not installed")
+          if os.environ["MODE"] in ("full", "script") and not os.environ.get("GEMINI_API_KEY"):
+              problems.append("Secret GEMINI_API_KEY is missing or empty")
+          if os.environ["MODE"] in ("full", "video") and not os.environ.get("POLLINATIONS_API_KEY"):
+              print("WARNING: POLLINATIONS_API_KEY is empty. Images will be slow and may fail.")
+          if problems:
+              print("PREFLIGHT FAILED:")
+              for p in problems:
+                  print(" -", p)
+              sys.exit(1)
+          print("Preflight OK")
+          PY
 
       - name: Run
         env:
