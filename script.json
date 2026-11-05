@@ -1,0 +1,125 @@
+{
+  "title": "महिंद्रा की दास्तान: स्टील ट्रेडिंग से ग्लोबल ऑटोमोबाइल साम्राज्य तक का सफर",
+  "scenes": [
+    {
+      "scene_number": 1,
+      "narration": "यह कहानी सिर्फ एक कार कंपनी की नहीं, बल्कि एक नए आजाद मुल्क के हौसले, खुद पर भरोसे और असंभव को संभव बनाने के जज्बे की है।",
+      "visual_prompt": "Cinematic wide shot of a rugged red modern Mahindra Thar conquering a rocky mountain cliff at golden hour, dust flying behind the wheels, photorealistic, dramatic lighting, 8k resolution."
+    },
+    {
+      "scene_number": 2,
+      "narration": "साल 1945, जब हिंदुस्तान अंग्रेजों की गुलामी से आजादी की दहलीज पर खड़ा था, तब दो भाइयों—जे.सी. महिंद्रा और के.सी. महिंद्रा ने एक सपना देखा था।",
+      "visual_prompt": "Historical sepia-toned vintage shot of 1940s colonial Bombay streets with vintage trams, classic architecture, and pedestrians in traditional attire, moody cinematic atmosphere."
+    },
+    {
+      "scene_number": 3,
+      "narration": "उनके साथ जुड़े गुलाम मोहम्मद, और इस तरह नींव पड़ी 'महिंद्रा एंड मोहम्मद' कंपनी की, जिसका शुरुआती काम था लोहे और स्टील का कारोबार करना।",
+      "visual_prompt": "Three well-dressed gentlemen in 1940s tailored suits sitting around a wooden office desk examining blueprints and steel trade ledgers, warm lamplight, vintage corporate office."
+    },
+    {
+      "scene_number": 4,
+      "narration": "लेकिन 1947 के बंटवारे ने इतिहास को बदल दिया। गुलाम मोहम्मद पाकिस्तान चले गए और बाद में वहां के पहले वित्त मंत्री बने।",
+      "visual_prompt": "Emotional and dramatic historical black and white portrayal of a 1947 steam engine train crowded with passengers during the partition of India, steam and smoke filling the station air."
+    },
+    {
+      "scene_number": 5,
+      "narration": "पीछे रह गए दोनों भाइयों ने हार नहीं मानी। उन्होंने कंपनी का नाम बदलकर 'महिंद्रा एंड महिंद्रा' किया, ताकि स्टेशनरी और लोगो पर छपे 'M&M' अक्षर व्यर्थ न जाएं।",
+      "visual_prompt": "Close-up macro shot of a vintage fountain pen striking through the word Mohammed on an official company document and writing Mahindra, ink texture, warm vintage grading."
+    },
+    {
+      "scene_number": 6,
+      "narration": "आजाद भारत के सामने सबसे बड़ी चुनौती थी—बिना सड़कों और खराब रास्तों वाले देश को आपस में जोड़ना। महिंद्रा ने इस मुश्किल में एक अवसर देखा।",
+      "visual_prompt": "Aerial view of a rugged, unpaved muddy road winding through rural Indian villages and vast agricultural landscapes in late 1940s, dusty atmospheric morning sunlight."
+    },
+    {
+      "scene_number": 7,
+      "narration": "साल 1949 में, अमेरिकी कंपनी विलीस ओवरलैंड के साथ करार हुआ और बॉम्बे के बंदरगाह पर विलीस जीप के पार्ट्स के डिब्बे उतरने लगे।",
+      "visual_prompt": "Vintage 1949 Mumbai port with wooden cargo crates labeled Willys Overland being unloaded by giant cranes from a cargo ship, dockworkers in retro attire, historical atmosphere."
+    },
+    {
+      "scene_number": 8,
+      "narration": "मझगांव के एक छोटे से असेंबली शेड में, 75 विलीस जीपों को पहली बार भारतीय हाथों ने जोड़कर तैयार किया। यह आत्मनिर्भरता की पहली चिंगारी थी।",
+      "visual_prompt": "Industrial workshop interior in 1949, Indian mechanics carefully assembling the steel chassis and engine of an olive-green vintage Willys Jeep, sparks from welding in background."
+    },
+    {
+      "scene_number": 9,
+      "narration": "देखते ही देखते, महिंद्रा की जीप भारतीय सेना, पुलिस और सुदूर गांवों की जीवनरेखा बन गई। यह एक ऐसी गाड़ी थी जो किसी भी गड्ढे और दलदल को चीर सकती थी।",
+      "visual_prompt": "Classic vintage Mahindra Jeep with cloth canopy roaring across a flooded muddy river crossing in a rural Indian forest, splashing water, heroic dynamic angle."
+    },
+    {
+      "scene_number": 10,
+      "narration": "1960 के दशक में जब भारत को खाद्यान्न संकट से जूझना पड़ा, तो महिंद्रा ने अपने कदम खेती की जमीन की ओर बढ़ाए और इंटरनेशनल हार्वेस्टर के साथ हाथ मिलाया।",
+      "visual_prompt": "Early 1960s agricultural setting, a classic red tractor plowing a vast fertile field at sunrise, Indian farmer with a turban looking hopefully towards the horizon."
+    },
+    {
+      "scene_number": 11,
+      "narration": "महिंद्रा ट्रैक्टरों ने हरित क्रांति की रीढ़ बनकर काम किया, और जल्द ही महिंद्रा दुनिया की सबसे बड़ी ट्रैक्टर निर्माता कंपनियों में शुमार हो गई।",
+      "visual_prompt": "A modern assembly plant lined with hundreds of gleaming red Mahindra tractors, pristine industrial floor, high-tech robotics, bright cinematic factory lighting."
+    },
+    {
+      "scene_number": 12,
+      "narration": "लेकिन 1991 के आर्थिक उदारीकरण ने महिंद्रा के सामने एक नया संकट खड़ा कर दिया। विदेशी ऑटोमोबाइल दिग्गजों के भारत में आने से कंपनी का अस्तित्व खतरे में था।",
+      "visual_prompt": "Modern newspaper headlines spinning on screen reading '1991 Indian Economic Reforms', bustling Dalal Street Mumbai, dramatic shadows and contrast."
+    },
+    {
+      "scene_number": 13,
+      "narration": "इसी दौर में कंपनी की कमान संभाली हार्वर्ड से लौटे युवा आनंद महिंद्रा ने, जिन्होंने पुराने ढर्रे को तोड़कर जोखिम उठाने का फैसला किया।",
+      "visual_prompt": "A sharp, visionary Indian business leader looking out of a high-rise Mumbai office window overlooking the Arabian Sea, intense determination, cool blue corporate tones."
+    },
+    {
+      "scene_number": 14,
+      "narration": "साल 2000 में आई 'बोलेरो'। अपने मजबूत लोहे के शरीर और कम रखरखाव के कारण यह गाड़ी हिंदुस्तान के हर कस्बे और देहात की पहचान बन गई।",
+      "visual_prompt": "A sturdy silver Mahindra Bolero parked proudly in a lively Indian rural marketplace, surrounded by colorful street shops and people, midday warm sun."
+    },
+    {
+      "scene_number": 15,
+      "narration": "लेकिन महिंद्रा को शहरी खरीदारों का दिल जीतना था। इसलिए उन्होंने शुरू किया अपना सबसे महत्वाकांक्षी और जोखिम भरा दांव—प्रोजेक्ट स्कॉर्पियो।",
+      "visual_prompt": "Secret automotive design studio with engineers sketches and clay models of an SUV covered in black cloth, dynamic rim lighting, mysterious and innovative ambience."
+    },
+    {
+      "scene_number": 16,
+      "narration": "साल 2002 में लॉन्च हुई स्कॉर्पियो ने भारतीय ऑटोमोबाइल बाजार में तहलका मचा दिया। इसने साबित कर दिया कि भारतीय कंपनी भी वर्ल्ड क्लास एसयूवी बना सकती है।",
+      "visual_prompt": "Grand 2002 launch event with flashbulbs popping, fog machines rolling back to reveal a gleaming black first-generation Mahindra Scorpio, triumphant dramatic spotlights."
+    },
+    {
+      "scene_number": 17,
+      "narration": "सफलता केवल गाड़ियों तक सीमित नहीं रही। 'टेक महिंद्रा' के जरिए आईटी सेक्टर में और सत्यम के अधिग्रहण से कंपनी ने दुनिया भर में अपना झंडा गाड़ा।",
+      "visual_prompt": "Futuristic IT command center of Tech Mahindra with massive digital screens showing global data streams, server lights blinking, ultra-modern tech aesthetic."
+    },
+    {
+      "scene_number": 18,
+      "narration": "कंपनी ने वैश्विक स्तर पर कदम बढ़ाते हुए इटली की विश्वप्रसिद्ध डिजाइन हाउस 'पिनिनफेरिना' को खरीदा, जिसने फेरारी की मशहूर कारें डिजाइन की थीं।",
+      "visual_prompt": "Luxurious automotive studio in Turin Italy, legendary Pininfarina Battista hypercar sculpted in carbon fiber, Italian elegance meeting Indian engineering mastery."
+    },
+    {
+      "scene_number": 19,
+      "narration": "जब दुनिया इलेक्ट्रिक गाड़ियों के बारे में सोच भी नहीं रही थी, तब महिंद्रा ने 'रेवा' का अधिग्रहण कर इलेक्ट्रिक मोबिलिटी की तरफ पहला कदम बढ़ा दिया था।",
+      "visual_prompt": "A futuristic bright yellow compact electric car charging at a futuristic glowing power station, green energy neon accents, night city backdrop."
+    },
+    {
+      "scene_number": 20,
+      "narration": "साल 2020 में आई नई 'थार' और फिर 'XUV700' और 'स्कॉर्पियो-एन' ने ऐसा जादू चलाया कि हफ्तों में लाखों बुकिंग्स के साथ वेटिंग लिस्ट सालों तक पहुंच गई।",
+      "visual_prompt": "Dramatic side-by-side showcase of modern midnight black Mahindra XUV700 and copper colored Thar, roaring engines, rain-slicked highway at twilight, cinematic."
+    },
+    {
+      "scene_number": 21,
+      "narration": "फॉर्मूला-ई रेसिंग ट्रैक्स पर महिंद्रा की इलेक्ट्रिक रेस कारें दुनिया की सबसे तेज मशीनों को टक्कर देकर तिरंगे का मान बढ़ा रही हैं।",
+      "visual_prompt": "Mahindra Formula E electric race car drifting around a sharp chicane at Monaco racetrack, motion blur, tire smoke, sleek red and white livery, high octane shot."
+    },
+    {
+      "scene_number": 22,
+      "narration": "जमीन से लेकर आसमान तक, महिंद्रा आज भारतीय सेना के लिए बख्तरबंद गाड़ियां और एयरोस्पेस के लिए हाई-टेक उपकरण तैयार कर रहा है।",
+      "visual_prompt": "A heavy-armored Mahindra defense vehicle painted in desert camouflage traversing extreme desert sand dunes, military precision, bold heroic perspective."
+    },
+    {
+      "scene_number": 23,
+      "narration": "अब महिंद्रा का अगला लक्ष्य है 'बॉर्न इलेक्ट्रिक' प्लेटफॉर्म—भविष्य की ऐसी एसयूवी जो पर्यावरण की रक्षा के साथ-साथ दुनिया भर में भारत का परचम लहराएंगी।",
+      "visual_prompt": "Sleek concept electric SUV glowing with edge-to-edge LED light bars on an infinity stage, glass roof reflecting constellations, avant-garde futuristic styling."
+    },
+    {
+      "scene_number": 24,
+      "narration": "1945 में स्टील की कुछ छड़ों से शुरू हुआ यह सफर आज अरबों डॉलर का ग्लोबल साम्राज्य है, जिसका एक ही मूल मंत्र है—राइज, यानी उठो और आगे बढ़ो।",
+      "visual_prompt": "Montage transition starting from a vintage 1945 Mahindra jeep transforming into a hyper-futuristic electric concept car, sunset horizon, glowing Mahindra logo, epic cinematic finale."
+    }
+  ]
+}
