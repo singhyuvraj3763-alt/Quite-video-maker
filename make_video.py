@@ -2,12 +2,14 @@
 Professional Bilingual (Hindi & English) Documentary Automation Pipeline
 - Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
 - Seamless English & Hindi support via LANGUAGE environment variable ("hi" or "en")
+- Storytelling-driven narration prompt (conversational cadence, natural pauses)
+- Voice tuning: SwaraNeural with +14% rate and +1Hz pitch to eliminate trailing syllable lag
 - High-res Wikimedia Commons archive search with deduplication
 - Quality-gated AI fallback (prevents distorted/melted figures)
 - Devanagari font auto-discovery to prevent tofu boxes in milestone badges
 - Fast single-pass structured script generation
 - Synchronized yellow captions (1-2 lines)
-- Natural documentary narration (SwaraNeural for Hindi, ChristopherNeural for English)
+- Ken Burns motion effects & milestone callout badges
 - Bottom logo crop filter to eliminate watermarks
 """
 
@@ -34,12 +36,15 @@ LANGUAGE = os.environ.get("LANGUAGE", "hi").strip().lower()  # "hi" or "en"
 if LANGUAGE == "en":
     DEFAULT_VOICE = "en-US-ChristopherNeural"
     DEFAULT_FONT = "DejaVu Sans"
+    VOICE_RATE = "+10%"
+    VOICE_PITCH = "+0Hz"
 else:
     DEFAULT_VOICE = "hi-IN-SwaraNeural"
     DEFAULT_FONT = "Noto Sans Devanagari"
+    VOICE_RATE = "+14%"
+    VOICE_PITCH = "+1Hz"
 
 VOICE = os.environ.get("VOICE", DEFAULT_VOICE)
-VOICE_RATE = "+10%"
 
 WORK = Path("work")
 OUT = Path("out")
@@ -189,23 +194,28 @@ def make_script(topic: str, n_scenes: int) -> dict:
         lang_rules = (
             "- title: Engaging English documentary title.\n"
             "- description: 2-3 sentence English summary.\n"
-            "- narration: Compelling spoken English documentary narration, exactly 28-36 words per scene.\n"
+            "- narration: Dynamic, conversational documentary storytelling (28-34 words per scene). Speak directly to the audience with suspense, vivid descriptions, and curiosity hooks. AVOID dry textbook summaries.\n"
             "- callout: 2-4 word milestone badge in English for dates, key figures, or landmarks (e.g., '1459 • Mehrangarh Fort', '1544 • Battle of Sammel'). Leave empty \"\" if no milestone.\n"
         )
     else:
         lang_rules = (
             "- title: Engaging Hindi documentary title.\n"
             "- description: 2-3 sentence Hindi summary.\n"
-            "- narration: Natural spoken Hindi in Devanagari script, exactly 25-35 words per scene.\n"
+            "- narration: जीवंत, रोमांचक और सरल किस्सागोई (Storytelling) शैली में हिंदी नरेशन (25-32 शब्द प्रति दृश्य)। "
+            "किताबों जैसी भारी-भरकम भाषा बिल्कुल न लिखें। ऐसे लिखें जैसे आप किसी को सामने बैठकर एक दास्तान सुना रहे हों। "
+            "जहाँ हल्का ठहराव चाहिए वहाँ अल्पविराम (,) का प्रयोग करें ताकि आवाज़ में खिंचाव या लैग न लगे। "
+            "उदाहरण: 'साल था 1459, जब तपते थार के सीने पर एक ऐसा किला खड़ा हुआ, जिसे देखकर दुश्मन भी थर्रा उठे।'\n"
             "- callout: 2-4 word milestone badge in Hindi/English for dates, rulers, battles, or places (e.g. '1459 • मेहरानगढ़ दुर्ग', '1544 • सुमेल युद्ध'). Leave empty \"\" if no milestone.\n"
         )
 
     prompt = (
-        f"You are writing a premium, fast-paced YouTube documentary script.\n"
+        f"You are a master historical storyteller creating a high-retention YouTube documentary.\n"
         f"Topic: {topic}\n"
         f"Language: {'English' if LANGUAGE == 'en' else 'Hindi'}\n"
         f"Create exactly {n_scenes} scenes in chronological order covering the complete story.\n"
-        "Rules:\n"
+        "Guidelines:\n"
+        "- Hook the listener immediately in Scene 1 with dramatic narrative tension.\n"
+        "- Use active voice, clear emotional pacing, and conversational momentum.\n"
         f"{lang_rules}"
         "- image_prompt: 3-5 specific English keywords focused on majestic architectural views, historical artifacts, vintage maps, royal durbars, weapons/armor, or landscapes. AVOID complex action shots like riders mounted on galloping horses. Examples: 'Mehrangarh Fort Jodhpur exterior', 'Ancient Rajput sword and shield artifact', 'Mandore cenotaphs architecture'. No text or logos.\n"
         "Return pure JSON:\n"
@@ -330,6 +340,7 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
             return True
     except Exception:
         pass
+
     return False
 def generate_images(scenes: list, topic: str) -> list:
     n = len(scenes)
@@ -356,7 +367,9 @@ def generate_images(scenes: list, topic: str) -> list:
 # ==================== Voiceover Engine ====================
 async def _edge(text: str, path: Path) -> None:
     import edge_tts
-    await edge_tts.Communicate(text, VOICE, rate=VOICE_RATE).save(str(path))
+    # Applying rate and pitch eliminates trailing syllable lag and gives dynamic rhythm
+    communicate = edge_tts.Communicate(text, VOICE, rate=VOICE_RATE, pitch=VOICE_PITCH)
+    await communicate.save(str(path))
 
 def audio_duration(path: Path) -> float:
     try:
@@ -563,4 +576,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-        
+    
