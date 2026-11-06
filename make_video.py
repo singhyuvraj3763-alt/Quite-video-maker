@@ -2,11 +2,10 @@
 Professional Bilingual (Hindi & English) Documentary Automation Pipeline
 - Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
 - Seamless English & Hindi support via LANGUAGE environment variable ("hi" or "en")
-- High-retention question hooks and curious storytelling intro
-- Voice tuning: SwaraNeural with +14% rate and +1Hz pitch to eliminate trailing syllable lag
-- Randomized Wikimedia Commons search with shuffling & offset rotation to prevent image duplication
+- Fully dynamic topic handling (no forced defaults)
+- Voice tuning: SwaraNeural with +14% rate and +1Hz pitch
+- Randomized Wikimedia Commons search tailored strictly to the current topic
 - Universal font auto-discovery supporting both Devanagari and Latin fonts for milestone badges
-- Bottom logo crop filter to eliminate watermarks
 """
 
 import asyncio
@@ -165,44 +164,39 @@ def gemini_json(prompt: str, label: str):
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing with Hooks & Emojis ====================
+# ==================== Script Processing (Strictly Topic-Driven) ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
 
 def make_script(topic: str, n_scenes: int) -> dict:
-    log(f"Generating full script in {LANGUAGE.upper()} for: {topic} ({n_scenes} scenes)")
+    log(f"Generating full script in {LANGUAGE.upper()} for exact topic: '{topic}' ({n_scenes} scenes)")
     
     if LANGUAGE == "en":
         lang_rules = (
-            "- title: Engaging English documentary title.\n"
+            "- title: Engaging English documentary title matching the topic.\n"
             "- description: 2-3 sentence English summary.\n"
-            "- narration: Dynamic, conversational documentary storytelling (28-34 words per scene). SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION. Speak directly to the audience with high suspense and curiosity.\n"
-            "- callout: 2-4 word milestone badge starting with a relevant emoji (e.g., '🏰 1459 • Mehrangarh Fort', '⚔️ 1544 • Battle of Sammel'). Leave empty \"\" if no milestone.\n"
+            "- narration: Dynamic, conversational storytelling (28-34 words per scene). SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION directly addressing the topic.\n"
+            "- callout: 2-4 word milestone badge starting with an emoji (e.g., '🌙 01 • The Silence', '✨ 02 • Deep Mind'). Leave empty \"\" if no milestone.\n"
         )
     else:
         lang_rules = (
-            "- title: Engaging Hindi documentary title.\n"
+            "- title: Engaging Hindi documentary title matching the topic.\n"
             "- description: 2-3 sentence Hindi summary.\n"
-            "- narration: जीवंत, रोमांचक और सरल किस्सागोई (Storytelling) शैली में हिंदी नरेशन (25-32 शब्द प्रति दृश्य)। "
-            "पहला दृश्य (Scene 1) एक जबरदस्त और जिज्ञासा से भरे सवाल से शुरू होना चाहिए ताकि दर्शक वीडियो छोड़कर न जाएँ। "
-            "जहाँ हल्का ठहराव चाहिए वहाँ अल्पविराम (,) का प्रयोग करें ताकि आवाज़ में लैग न लगे。\n"
-            "- callout: 2-4 word milestone badge starting with an engaging emoji (e.g., '🏰 1459 • मेहरानगढ़ दुर्ग', '⚔️ 1544 • सुमेल युद्ध'). Leave empty \"\" if no milestone.\n"
+            "- narration: जीवंत, रोमांचक और सरल किस्सागोई शैली में हिंदी नरेशन (25-32 शब्द प्रति दृश्य)। पहला दृश्य (Scene 1) इसी विषय पर एक जबरदस्त और जिज्ञासा से भरे सवाल से शुरू होना चाहिए।\n"
+            "- callout: 2-4 word milestone badge starting with an emoji (e.g., '🌙 01 • शुरुआत', '✨ 02 • रहस्य'). Leave empty \"\" if no milestone.\n"
         )
 
     prompt = (
-        f"You are a master historical storyteller creating a high-retention YouTube documentary.\n"
-        f"Topic: {topic}\n"
+        f"You are a master documentary storyteller creating a high-retention YouTube video.\n"
+        f"Exact Topic / Subject: {topic}\n"
         f"Language: {'English' if LANGUAGE == 'en' else 'Hindi'}\n"
-        f"Create exactly {n_scenes} scenes in chronological order covering the complete story from start to finish.\n"
-        "CRITICAL RULE FOR IMAGES: Every single scene MUST have a 100% UNIQUE 'image_prompt'. "
-        "DO NOT repeat similar visual prompts across scenes. Progress chronologically: "
-        "Early scenes = ancient origins & foundation; Middle scenes = major battles, rulers, and fortifications; "
-        "Final scenes (Scene 18-24) = modern history, royal palaces, cenotaphs, Umaid Bhawan Palace, and cultural heritage.\n"
+        f"Create exactly {n_scenes} scenes covering this exact topic from start to finish. DO NOT switch to history or kings unless the topic itself is about history.\n"
+        "CRITICAL RULE FOR IMAGES: Every single scene MUST have a 100% UNIQUE 'image_prompt' directly relevant to what is being narrated in that scene.\n"
         "Guidelines:\n"
-        "- Hook the listener immediately in Scene 1 with dramatic narrative tension and a question.\n"
+        "- Hook the listener immediately in Scene 1 with dramatic narrative tension and a question about the topic.\n"
         f"{lang_rules}"
-        "- image_prompt: 3-5 specific English keywords focused on majestic architectural views, historical artifacts, vintage maps, royal durbars, weapons/armor, or landscapes. No text or logos.\n"
+        "- image_prompt: 3-5 specific English keywords matching the scene's narration concept. Cinematic, 8k, professional photography style. No text or logos.\n"
         "Return pure JSON:\n"
         '{\n'
         '  "title": "Title",\n'
@@ -229,7 +223,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
         "scenes": scenes,
     }
 
-# ==================== High-Res Visuals Engine with Randomization ====================
+# ==================== High-Res Visuals Engine (Topic-Matched) ====================
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -244,25 +238,18 @@ def fit_cover(img: Image.Image) -> Image.Image:
     return img.resize((W, H), Image.LANCZOS)
 
 def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
-    headers = {"User-Agent": "HistoricalDocBot/3.0"}
+    headers = {"User-Agent": "TopicDocBot/3.0"}
     prompt = scene_info.get("image_prompt", "")
     words = [w for w in re.findall(r"\b[A-Za-z]+\b", prompt) if len(w) > 2]
-    specific_query = " ".join(words[:4]) if words else "Rajasthan history"
-    topic_clean = " ".join([w for w in re.findall(r"\b[A-Za-z]+\b", topic) if len(w) > 2][:3])
+    specific_query = " ".join(words[:4]) if words else topic
     
-    fallbacks = [
-        f"{topic_clean} vintage archive painting",
-        f"historical museum artifact {topic_clean}",
-        "Rajasthan royal heritage painting old art",
-        "ancient Indian architecture landmark",
-        "traditional Mewar Marwar miniature artwork"
-    ]
-    random.shuffle(fallbacks)
-
     query_chain = [
-        f"{specific_query} Rajasthan",
+        prompt,
         specific_query,
-    ] + fallbacks
+        f"{topic} cinematic photography",
+        f"{topic} conceptual art"
+    ]
+    random.shuffle(query_chain)
 
     for q in query_chain:
         api_url = "https://commons.wikimedia.org/w/api.php"
@@ -271,8 +258,8 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
             "generator": "search",
             "gsrsearch": q,
             "gsrnamespace": 6,
-            "gsrlimit": 20,
-            "gsroffset": random.randint(0, 10),
+            "gsrlimit": 15,
+            "gsroffset": random.randint(0, 5),
             "prop": "imageinfo",
             "iiprop": "url|mime",
             "iiurlwidth": 1280,
@@ -299,8 +286,8 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
         except Exception:
             continue
 
-    core_kw = " ".join(words[:5]) if words else "historical architecture Rajasthan"
-    safe_prompt = quote(f"{core_kw}, cinematic documentary still, national geographic style, 8k, sharp focus")
+    # AI Fallback matching the scene's exact prompt
+    safe_prompt = quote(f"{prompt}, cinematic documentary still, national geographic style, 8k, sharp focus")
     ai_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=1280&height=720&seed={seed + random.randint(1,9999)}&nologo=true&model=turbo"
     try:
         r = requests.get(ai_url, headers=headers, timeout=14)
@@ -317,7 +304,7 @@ def generate_images(scenes: list, topic: str) -> list:
     for i, sc in enumerate(scenes):
         img = WORK / f"img_{i:03d}.jpg"
         if not (img.exists() and img.stat().st_size > 5000):
-            log(f"Fetching Distinct Visual {i + 1}/{n}: {sc['image_prompt'][:45]}...")
+            log(f"Fetching Visual {i + 1}/{n}: {sc['image_prompt'][:45]}...")
             ok = fetch_image(sc, img, seed=8000 + (i * 47), topic=topic)
             if not ok:
                 cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#141c26:s={W}x{H}:d=1", "-frames:v", "1", str(img)]
@@ -384,7 +371,7 @@ def create_subtitles(scenes: list, durs: list, srt_path: Path):
             sub_idx += 1
     srt_path.write_text("\n".join(lines), encoding="utf-8")
 
-# ==================== Dynamic Cinematic FX & Callout Compositing ====================
+# ==================== Dynamic Cinematic FX & Emoji-Safe Callouts ====================
 def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> str:
     f = frames
     cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
@@ -405,23 +392,20 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     )
 
     if callout and len(callout.strip()) > 1:
-        clean_callout = (
-            callout.replace("\\", "")
-            .replace("'", "")
-            .replace(":", " - ")
-            .replace('"', "")
-            .strip()
-        )
-        badge_duration = min(4.5, dur - 0.5) if dur > 2 else dur
-        box_w = max(260, min(850, len(clean_callout) * 17 + 60))
-        font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else f"font='{DEFAULT_FONT}'"
+        # Clean text for English fonts while keeping basic symbols
+        clean_callout = re.sub(r'[^\w\s\d\•\-\,\.\(\)\🌙✨🔥⚡]', '', callout).strip()
+        
+        if len(clean_callout) > 1:
+            badge_duration = min(3.0, dur * 0.6) if dur > 1.5 else dur
+            box_w = max(240, min(850, len(clean_callout) * 14 + 50))
+            font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else f"font='{DEFAULT_FONT}'"
 
-        vf += (
-            f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.80:t=fill:enable='between(t,0.5,{badge_duration})'"
-            f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.5,{badge_duration})'"
-            f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=22:x=105:y=98:"
-            f"{font_opt}:enable='between(t,0.5,{badge_duration})'"
-        )
+            vf += (
+                f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.80:t=fill:enable='between(t,0.3,{badge_duration})'"
+                f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.3,{badge_duration})'"
+                f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=22:x=105:y=98:"
+                f"{font_opt}:enable='between(t,0.3,{badge_duration})'"
+            )
     return vf
 
 def render_clip(img: Path, aud: Path, clip: Path, i: int, dur: float, callout: str) -> None:
@@ -443,7 +427,7 @@ def build_video(data: dict) -> None:
     topic = data.get("topic", "History")
     n = len(scenes)
 
-    log("=== Step 1/3: Generating Distinct Scene Visuals ===")
+    log("=== Step 1/3: Generating Topic-Specific Visuals ===")
     imgs = generate_images(scenes, topic=topic)
 
     log("=== Step 2/3: Recording Narration ===")
@@ -498,7 +482,7 @@ def build_video(data: dict) -> None:
 # ==================== Main Runner ====================
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "full"
-    topic = os.environ.get("TOPIC", "The history of Marwar").strip()
+    topic = os.environ.get("TOPIC", "General Knowledge").strip()
     n = int(os.environ.get("SCENES", "24") or 24)
 
     if mode == "full" and os.environ.get("RESUME") != "1":
@@ -524,4 +508,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
+        
