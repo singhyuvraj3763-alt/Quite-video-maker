@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'full = topic to finished video in one go. script = script only. video = render from saved script.json'
+        description: 'full = topic to finished video. script = script only. video = render from script.json'
         type: choice
         options:
           - full
@@ -12,16 +12,14 @@ on:
           - video
         default: full
       topic:
-        description: 'Topic, e.g. The Mahindra story'
+        description: 'Topic, e.g. The Mahindra story in Hindi'
         type: string
         required: false
+        default: 'The Mahindra story in Hindi'
       scenes:
-        description: 'Number of scenes (24 is about 9 minutes, 30 is about 11 minutes)'
+        description: 'Number of scenes'
         type: string
         default: '24'
-  push:
-    paths:
-      - topic.txt
 
 permissions:
   contents: write
@@ -40,80 +38,33 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install ffmpeg and fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-deva
 
       - name: Install Python packages
         run: pip install requests edge-tts gTTS Pillow
 
-      - name: Check that make_video.py was pasted correctly
-        run: |
-          if ! python -m py_compile make_video.py; then
-            echo "::error::make_video.py is damaged. Paste it again, or upload the file."
-            exit 2
-          fi
-          echo "make_video.py is readable: OK"
-
-      - name: Preflight check
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
-          MODE: ${{ inputs.mode || 'full' }}
-        run: |
-          python - <<'PY'
-          import importlib, os, shutil, sys
-          problems = []
-          for mod in ("requests", "edge_tts", "gtts", "PIL"):
-              try:
-                  importlib.import_module(mod)
-              except Exception as e:
-                  problems.append(f"Python package missing: {mod} ({e})")
-          for tool in ("ffmpeg", "ffprobe"):
-              if not shutil.which(tool):
-                  problems.append(f"{tool} is not installed")
-          mode = os.environ.get("MODE", "full")
-          if mode in ("full", "script") and not os.environ.get("GEMINI_API_KEY"):
-              problems.append("Secret GEMINI_API_KEY is missing or empty")
-          if problems:
-              print("PREFLIGHT FAILED:")
-              for p in problems:
-                  print(" -", p)
-              sys.exit(1)
-          print("Preflight OK")
-          PY
+      - name: Syntax check
+        run: python -m py_compile make_video.py
 
       - name: Make the video
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
-          TOPIC: ${{ inputs.topic }}
+          TOPIC: ${{ inputs.topic || 'The Mahindra story in Hindi' }}
           SCENES: ${{ inputs.scenes || '24' }}
           MODE: ${{ inputs.mode || 'full' }}
-        run: |
-          for attempt in 1 2 3; do
-            export ATTEMPT=$attempt
-            if python make_video.py "$MODE"; then
-              exit 0
-            fi
-            rc=$?
-            if [ "$rc" -eq 2 ]; then
-              echo "This is a permanent problem, so retrying will not help."
-              exit 2
-            fi
-            echo "::warning:: Attempt $attempt did not finish. Waiting 60 seconds..."
-            export RESUME=1
-            sleep 60
-          done
-          echo "All attempts failed."
-          exit 1
+        run: python make_video.py "$MODE"
 
-      - name: Save script.json to the repo
+      - name: Save script
         if: ${{ inputs.mode == 'script' }}
         run: |
           git config user.name "video-bot"
           git config user.email "video-bot@users.noreply.github.com"
           git add script.json
-          git commit -m "Update script" || echo "No changes to commit"
+          git commit -m "Update script" || echo "No changes"
           git push
 
       - name: Upload results
