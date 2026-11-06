@@ -17,7 +17,7 @@ on:
         type: string
         required: false
       scenes:
-        description: "Number of scenes (24 is about 8-10 minutes)"
+        description: "Number of scenes (24 is about 9 minutes, 30 is about 11 minutes)"
         type: string
         default: "24"
   # 2) Or edit topic.txt in the repository and commit: a video starts automatically
@@ -31,7 +31,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
 
@@ -62,10 +62,11 @@ jobs:
           for tool in ("ffmpeg", "ffprobe"):
               if not shutil.which(tool):
                   problems.append(f"{tool} is not installed")
-          if os.environ["MODE"] in ("full", "script") and not os.environ.get("GEMINI_API_KEY"):
+          mode = os.environ["MODE"]
+          if mode in ("full", "script") and not os.environ.get("GEMINI_API_KEY"):
               problems.append("Secret GEMINI_API_KEY is missing or empty")
-          if os.environ["MODE"] in ("full", "video") and not os.environ.get("POLLINATIONS_API_KEY"):
-              print("WARNING: POLLINATIONS_API_KEY is empty. Images will be slow and may fail.")
+          if mode in ("full", "video") and not os.environ.get("POLLINATIONS_API_KEY"):
+              problems.append("Secret POLLINATIONS_API_KEY is missing or empty")
           if problems:
               print("PREFLIGHT FAILED:")
               for p in problems:
@@ -74,14 +75,28 @@ jobs:
           print("Preflight OK")
           PY
 
-      - name: Run
+      - name: Make the video (retries by itself and keeps finished work)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
           TOPIC: ${{ inputs.topic }}
           SCENES: ${{ inputs.scenes || '24' }}
           MODE: ${{ inputs.mode || 'full' }}
-        run: python make_video.py "$MODE"
+        run: |
+          for attempt in 1 2 3; do
+            export ATTEMPT=$attempt
+            python make_video.py "$MODE" && exit 0
+            rc=$?
+            if [ "$rc" -eq 2 ]; then
+              echo "This is a permanent problem, so retrying will not help."
+              exit 2
+            fi
+            echo "::warning::Attempt $attempt did not finish. Waiting 90 seconds, then continuing where it stopped."
+            export RESUME=1
+            sleep 90
+          done
+          echo "All 3 attempts failed."
+          exit 1
 
       - name: Save script.json to the repo
         if: ${{ inputs.mode == 'script' }}
@@ -93,8 +108,9 @@ jobs:
           git push
 
       - name: Upload results
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: results-${{ inputs.mode || 'full' }}
           path: out/
-
+          if-no-files-found: ignore
