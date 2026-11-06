@@ -1,9 +1,9 @@
 """
 Professional Hindi Documentary Automation Pipeline
 - Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
+- Zero-watermark archival & AI visual pipeline (Wikimedia Commons + Pollinations fallback)
 - Fast single-pass structured script generation
 - Milestone Callout Badges with Devanagari font support & safe FFmpeg escaping
-- Paced image requests with multi-endpoint fallback
 - Fast, readable 1-2 line synchronized Hindi subtitles
 - Energetic SwaraNeural voiceover (+10% rate)
 - Bottom logo crop filter to eliminate watermarks
@@ -51,7 +51,6 @@ def gemini_key() -> str:
     return key
 
 def get_live_models(key: str) -> list:
-    """Queries Google AI Studio to retrieve every model currently active on this key."""
     url = f"{GEMINI_BASE}/models?pageSize=100"
     try:
         r = requests.get(url, headers={"x-goog-api-key": key}, timeout=25)
@@ -189,7 +188,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
         "scenes": scenes,
     }
 
-# ==================== Visuals Generation ====================
+# ==================== High-Res Visuals Engine (Wikimedia + AI) ====================
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -203,35 +202,76 @@ def fit_cover(img: Image.Image) -> Image.Image:
         img = img.crop((0, top, w, top + nh))
     return img.resize((W, H), Image.LANCZOS)
 
-def fetch_image(prompt: str, path: Path, seed: int) -> bool:
-    key = os.environ.get("POLLINATIONS_API_KEY", "").strip()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+def search_wikimedia_highres(query: str) -> str:
+    """Finds genuine historical, high-resolution original images on Wikimedia Commons."""
+    api_url = "https://commons.wikimedia.org/w/api.php"
+    headers = {"User-Agent": "HistoricalDocBot/2.0 (educational automated pipeline)"}
+    params = {
+        "action": "query",
+        "generator": "search",
+        "gsrsearch": f"{query} filetype:bitmap",
+        "gsrlimit": 5,
+        "prop": "imageinfo",
+        "iiprop": "url|size|mime",
+        "format": "json"
     }
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
+    try:
+        r = requests.get(api_url, params=params, headers=headers, timeout=10)
+        if r.status_code == 200:
+            pages = r.json().get("query", {}).get("pages", {})
+            for pid, info in pages.items():
+                imginfo = info.get("imageinfo", [{}])[0]
+                mime = imginfo.get("mime", "")
+                width = imginfo.get("width", 0)
+                height = imginfo.get("height", 0)
+                url = imginfo.get("url", "")
+                
+                # Check for high-resolution raster file (no SVGs or tiny icons)
+                if ("jpeg" in mime or "png" in mime or "jpg" in mime) and width >= 1024 and height >= 600:
+                    return url
+    except Exception:
+        pass
+    return ""
 
-    words = [w for w in re.findall(r"\b\w+\b", prompt) if len(w) > 2][:10]
-    subject = " ".join(words)
-    clean_p = quote(f"{subject}, historical documentary, cinematic lighting, 16:9")
+def fetch_image(prompt: str, path: Path, seed: int) -> bool:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
 
-    urls = [
-        f"https://image.pollinations.ai/prompt/{clean_p}?width=1280&height=720&seed={seed}&nologo=true",
-        f"https://image.pollinations.ai/prompt/{quote(subject)}?width=1280&height=720&seed={seed+5}&nologo=true",
-        f"https://image.pollinations.ai/prompt/{clean_p}?width=1024&height=576&seed={seed+10}&nologo=true&model=turbo"
+    stop_words = {"cinematic", "dramatic", "shot", "view", "scene", "historical", "lighting", "ultra", "realistic"}
+    words = [w for w in re.findall(r"\b[A-Za-z]+\b", prompt) if len(w) > 3 and w.lower() not in stop_words]
+    core_search = " ".join(words[:4]) if words else "Rajasthan history"
+
+    # Step 1: Wikimedia Commons high-resolution public archive search
+    wiki_url = search_wikimedia_highres(core_search)
+    if wiki_url:
+        try:
+            r = requests.get(wiki_url, headers=headers, timeout=14)
+            if r.status_code == 200 and len(r.content) > 25000:
+                img = Image.open(io.BytesIO(r.content)).convert("RGB")
+                if img.width >= 800 and img.height >= 500:
+                    fit_cover(img).save(path, quality=92)
+                    return True
+        except Exception:
+            pass
+
+    # Step 2: High-Quality Direct AI Generation
+    clean_prompt = quote(f"{' '.join(words[:8])}, authentic documentary photography, 35mm archival realism, 16:9")
+    ai_urls = [
+        f"https://image.pollinations.ai/prompt/{clean_prompt}?width=1280&height=720&seed={seed}&nologo=true&model=turbo",
+        f"https://image.pollinations.ai/prompt/{quote(' '.join(words[:6]))}?width=1280&height=720&seed={seed+9}&nologo=true"
     ]
 
-    for url in urls:
-        for attempt in range(2):
-            try:
-                r = requests.get(url, headers=headers, timeout=18)
-                if r.status_code == 200 and len(r.content) > 5000:
-                    img = Image.open(io.BytesIO(r.content)).convert("RGB")
-                    fit_cover(img).save(path, quality=90)
-                    return True
-            except Exception:
-                time.sleep(1.5)
-                continue
+    for url in ai_urls:
+        try:
+            r = requests.get(url, headers=headers, timeout=16)
+            if r.status_code == 200 and len(r.content) > 8000:
+                img = Image.open(io.BytesIO(r.content)).convert("RGB")
+                fit_cover(img).save(path, quality=92)
+                return True
+        except Exception:
+            time.sleep(1.5)
+            continue
 
     return False
 
@@ -241,16 +281,22 @@ def generate_images(scenes: list) -> list:
     for i, sc in enumerate(scenes):
         img = WORK / f"img_{i:03d}.jpg"
         if not (img.exists() and img.stat().st_size > 5000):
-            log(f"Generating Image {i + 1}/{n}: {sc['image_prompt'][:45]}...")
-            ok = fetch_image(sc["image_prompt"], img, seed=5000 + (i * 37))
+            log(f"Fetching Scene Visual {i + 1}/{n}: {sc['image_prompt'][:45]}...")
+            ok = fetch_image(sc["image_prompt"], img, seed=7000 + (i * 31))
+            
             if not ok:
-                log(f"::warning:: Image {i + 1} timed out from provider. Generating solid dark slate.")
-                cmd = [
-                    "ffmpeg", "-y", "-f", "lavfi",
-                    "-i", f"color=c=#101820:s={W}x{H}:d=1",
-                    "-frames:v", "1", str(img)
-                ]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                log(f"::warning:: Visual {i + 1} fallback engaged.")
+                prev = WORK / f"img_{i-1:03d}.jpg"
+                if prev.exists() and prev.stat().st_size > 5000:
+                    import shutil
+                    shutil.copy(prev, img)
+                else:
+                    cmd = [
+                        "ffmpeg", "-y", "-f", "lavfi",
+                        "-i", f"color=c=#101820:s={W}x{H}:d=1",
+                        "-frames:v", "1", str(img)
+                    ]
+                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             time.sleep(2.5)
 
@@ -331,6 +377,7 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     ]
     z, x, y = styles[i % 4]
 
+    # Watermark bottom 45px slice and Ken Burns motion
     vf = (
         f"crop=iw:ih-45:0:0,"
         f"scale=3840:2160:flags=lanczos,"
@@ -338,7 +385,6 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     )
 
     if callout and len(callout.strip()) > 1:
-        # Strictly escape FFmpeg filter characters: \ ' : %
         clean_callout = (
             callout.replace("\\", "")
             .replace("'", "")
@@ -460,4 +506,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-                        
+    
