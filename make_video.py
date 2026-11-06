@@ -164,7 +164,7 @@ def gemini_json(prompt: str, label: str):
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing with Hooks & Emojis ====================
+# ==================== Script Processing with Hooks & Unique Images ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
@@ -176,7 +176,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
         lang_rules = (
             "- title: Engaging English documentary title.\n"
             "- description: 2-3 sentence English summary.\n"
-            "- narration: Dynamic, conversational documentary storytelling (28-34 words per scene). SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION (e.g., 'Have you ever felt something different this winter...?' or 'What secret lies hidden behind...'). Speak directly to the audience with high suspense and curiosity.\n"
+            "- narration: Dynamic, conversational documentary storytelling (28-34 words per scene). SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION. Speak directly to the audience with high suspense and curiosity.\n"
             "- callout: 2-4 word milestone badge starting with a relevant emoji (e.g., '🏰 1459 • Mehrangarh Fort', '⚔️ 1544 • Battle of Sammel'). Leave empty \"\" if no milestone.\n"
         )
     else:
@@ -184,7 +184,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
             "- title: Engaging Hindi documentary title.\n"
             "- description: 2-3 sentence Hindi summary.\n"
             "- narration: जीवंत, रोमांचक और सरल किस्सागोई (Storytelling) शैली में हिंदी नरेशन (25-32 शब्द प्रति दृश्य)। "
-            "पहला दृश्य (Scene 1) एक जबरदस्त और जिज्ञासा से भरे सवाल से शुरू होना चाहिए ताकि दर्शक वीडियो छोड़कर न जाएँ (जैसे: 'क्या आपने इस सर्दियों में कुछ अलग महसूस किया है...?' या 'क्या आप जानते हैं उस रहस्य के बारे में...?' )। "
+            "पहला दृश्य (Scene 1) एक जबरदस्त और जिज्ञासा से भरे सवाल से शुरू होना चाहिए ताकि दर्शक वीडियो छोड़कर न जाएँ। "
             "जहाँ हल्का ठहराव चाहिए वहाँ अल्पविराम (,) का प्रयोग करें ताकि आवाज़ में लैग न लगे。\n"
             "- callout: 2-4 word milestone badge starting with an engaging emoji (e.g., '🏰 1459 • मेहरानगढ़ दुर्ग', '⚔️ 1544 • सुमेल युद्ध'). Leave empty \"\" if no milestone.\n"
         )
