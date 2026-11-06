@@ -2,10 +2,10 @@
 Professional Bilingual (Hindi & English) Documentary Automation Pipeline
 - Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
 - Seamless English & Hindi support via LANGUAGE environment variable ("hi" or "en")
-- Storytelling-driven narration prompt with chronological image progression
+- High-retention question hooks and curious storytelling intro
 - Voice tuning: SwaraNeural with +14% rate and +1Hz pitch to eliminate trailing syllable lag
 - High-res Wikimedia Commons archive search with deduplication
-- Devanagari font auto-discovery to prevent tofu boxes in milestone badges
+- Universal font auto-discovery supporting both Devanagari and Latin fonts for milestone badges
 - Bottom logo crop filter to eliminate watermarks
 """
 
@@ -31,12 +31,12 @@ LANGUAGE = os.environ.get("LANGUAGE", "hi").strip().lower()  # "hi" or "en"
 
 if LANGUAGE == "en":
     DEFAULT_VOICE = "en-US-ChristopherNeural"
-    DEFAULT_FONT = "DejaVu Sans"
+    DEFAULT_FONT = "DejaVuSans-Bold"
     VOICE_RATE = "+10%"
     VOICE_PITCH = "+0Hz"
 else:
     DEFAULT_VOICE = "hi-IN-SwaraNeural"
-    DEFAULT_FONT = "Noto Sans Devanagari"
+    DEFAULT_FONT = "NotoSansDevanagari-Bold"
     VOICE_RATE = "+14%"
     VOICE_PITCH = "+1Hz"
 
@@ -54,23 +54,24 @@ def fatal(msg: str) -> None:
 def log(msg: str) -> None:
     print(msg, flush=True)
 
-# ==================== Font Discovery ====================
+# ==================== Universal Font Discovery ====================
 def get_font_path() -> tuple:
-    devanagari_candidates = [
+    candidates = [
         "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Bold.otf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
     ]
-    for c in devanagari_candidates:
+    for c in candidates:
         if os.path.exists(c):
-            return c, "Noto Sans Devanagari"
-    for p in Path("/usr/share/fonts").rglob("*Devanagari*.ttf"):
-        return str(p), "Noto Sans Devanagari"
+            return c, Path(c).stem
+    for p in Path("/usr/share/fonts").rglob("*.ttf"):
+        if "Bold" in p.name or "Sans" in p.name:
+            return str(p), p.stem
     return "", DEFAULT_FONT
 
 FONT_FILE, FONT_NAME = get_font_path()
-if FONT_FILE and LANGUAGE == "hi":
+if FONT_FILE:
     log(f"Font loaded: {FONT_FILE}")
 
 # ==================== Dynamic Gemini Script Engine ====================
@@ -93,7 +94,6 @@ def get_live_models(key: str) -> list:
                 methods = m.get("supportedGenerationMethods", [])
                 if "generateContent" in methods and not any(b in name for b in BAD_WORDS):
                     usable.append(name)
-            
             if usable:
                 def sort_priority(n: str) -> int:
                     nl = n.lower()
@@ -164,7 +164,7 @@ def gemini_json(prompt: str, label: str):
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing (With Unique Image Rules) ====================
+# ==================== Script Processing with Hooks & Emojis ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
@@ -176,17 +176,17 @@ def make_script(topic: str, n_scenes: int) -> dict:
         lang_rules = (
             "- title: Engaging English documentary title.\n"
             "- description: 2-3 sentence English summary.\n"
-            "- narration: Dynamic, conversational documentary storytelling (28-34 words per scene). Speak directly to the audience with suspense, vivid descriptions, and curiosity hooks.\n"
-            "- callout: 2-4 word milestone badge in English for dates, key figures, or landmarks (e.g., '1459 • Mehrangarh Fort'). Leave empty \"\" if no milestone.\n"
+            "- narration: Dynamic, conversational documentary storytelling (28-34 words per scene). SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION (e.g., 'Have you ever felt something different this winter...?' or 'What secret lies hidden behind...'). Speak directly to the audience with high suspense and curiosity.\n"
+            "- callout: 2-4 word milestone badge starting with a relevant emoji (e.g., '🏰 1459 • Mehrangarh Fort', '⚔️ 1544 • Battle of Sammel'). Leave empty \"\" if no milestone.\n"
         )
     else:
         lang_rules = (
             "- title: Engaging Hindi documentary title.\n"
             "- description: 2-3 sentence Hindi summary.\n"
             "- narration: जीवंत, रोमांचक और सरल किस्सागोई (Storytelling) शैली में हिंदी नरेशन (25-32 शब्द प्रति दृश्य)। "
-            "किताबों जैसी भारी-भरकम भाषा बिल्कुल न लिखें। ऐसे लिखें जैसे आप किसी को सामने बैठकर एक दास्तान सुना रहे हों। "
-            "जहाँ हल्का ठहराव चाहिए वहाँ अल्पविराम (,) का प्रयोग करें ताकि आवाज़ में लैग न लगे।\n"
-            "- callout: 2-4 word milestone badge in Hindi/English for dates, rulers, battles, or places (e.g. '1459 • मेहरानगढ़ दुर्ग'). Leave empty \"\" if no milestone.\n"
+            "पहला दृश्य (Scene 1) एक जबरदस्त और जिज्ञासा से भरे सवाल से शुरू होना चाहिए ताकि दर्शक वीडियो छोड़कर न जाएँ (जैसे: 'क्या आपने इस सर्दियों में कुछ अलग महसूस किया है...?' या 'क्या आप जानते हैं उस रहस्य के बारे में...?' )। "
+            "जहाँ हल्का ठहराव चाहिए वहाँ अल्पविराम (,) का प्रयोग करें ताकि आवाज़ में लैग न लगे。\n"
+            "- callout: 2-4 word milestone badge starting with an engaging emoji (e.g., '🏰 1459 • मेहरानगढ़ दुर्ग', '⚔️ 1544 • सुमेल युद्ध'). Leave empty \"\" if no milestone.\n"
         )
 
     prompt = (
@@ -199,9 +199,9 @@ def make_script(topic: str, n_scenes: int) -> dict:
         "Early scenes = ancient origins & foundation; Middle scenes = major battles, rulers, and fortifications; "
         "Final scenes (Scene 18-24) = modern history, royal palaces, cenotaphs, Umaid Bhawan Palace, and cultural heritage.\n"
         "Guidelines:\n"
-        "- Hook the listener immediately in Scene 1 with dramatic narrative tension.\n"
+        "- Hook the listener immediately in Scene 1 with dramatic narrative tension and a question.\n"
         f"{lang_rules}"
-        "- image_prompt: 3-5 specific English keywords focused on majestic architectural views, historical artifacts, vintage maps, royal durbars, weapons/armor, or landscapes. Examples for later scenes: 'Umaid Bhawan Palace Jodhpur exterior architecture', 'Jaswant Thada marble cenotaph Jodhpur', 'Vintage royal carriage artifact Rajasthan'. No text or logos.\n"
+        "- image_prompt: 3-5 specific English keywords focused on majestic architectural views, historical artifacts, vintage maps, royal durbars, weapons/armor, or landscapes. No text or logos.\n"
         "Return pure JSON:\n"
         '{\n'
         '  "title": "Title",\n'
@@ -390,17 +390,19 @@ def create_subtitles(scenes: list, durs: list, srt_path: Path):
             sub_idx += 1
     srt_path.write_text("\n".join(lines), encoding="utf-8")
 
-# ==================== Motion & Callout Video Compositing ====================
+# ==================== Dynamic Cinematic FX & Callout Compositing ====================
 def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> str:
     f = frames
     cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
-    styles = [
-        (f"1+0.12*on/{f}", cx, cy),
-        (f"1.12-0.12*on/{f}", cx, cy),
-        ("1.08", f"(iw-iw/zoom)*on/{f}", cy),
-        ("1.08", f"(iw-iw/zoom)*(1-on/{f})", cy),
+    
+    fx_styles = [
+        (f"1+0.14*on/{f}", cx, cy),
+        (f"1.14-0.14*on/{f}", cx, cy),
+        ("1.1", f"(iw-iw/zoom)*on/{f}", cy),
+        ("1.1", f"(iw-iw/zoom)*(1-on/{f})", cy),
+        (f"1+0.08*on/{f}", f"(ih-ih/zoom)*on/{f}", f"(ih-ih/zoom)*on/{f}"),
     ]
-    z, x, y = styles[i % 4]
+    z, x, y = fx_styles[i % len(fx_styles)]
 
     vf = (
         f"crop=iw:ih-45:0:0,"
@@ -409,15 +411,21 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     )
 
     if callout and len(callout.strip()) > 1:
-        clean_callout = callout.replace("\\", "").replace("'", "").replace(":", " - ").strip()
+        clean_callout = (
+            callout.replace("\\", "")
+            .replace("'", "")
+            .replace(":", " - ")
+            .replace('"', "")
+            .strip()
+        )
         badge_duration = min(4.5, dur - 0.5) if dur > 2 else dur
-        box_w = max(240, min(800, len(clean_callout) * 16 + 50))
-        font_opt = f"fontfile='{FONT_FILE}'" if (FONT_FILE and LANGUAGE == "hi") else f"font='{FONT_NAME}'"
+        box_w = max(260, min(850, len(clean_callout) * 17 + 60))
+        font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else f"font='{DEFAULT_FONT}'"
 
         vf += (
-            f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.75:t=fill:enable='between(t,0.5,{badge_duration})'"
+            f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.80:t=fill:enable='between(t,0.5,{badge_duration})'"
             f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.5,{badge_duration})'"
-            f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=22:x=102:y=98:"
+            f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=22:x=105:y=98:"
             f"{font_opt}:enable='between(t,0.5,{badge_duration})'"
         )
     return vf
