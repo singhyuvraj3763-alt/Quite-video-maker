@@ -1,10 +1,10 @@
 """
-Quiet Video Maker - Automated Documentary Pipeline
-- Automatic milestone callout badges (no FFmpeg eval errors)
-- Contextual visual generation matching the topic
-- Dynamic 1-2 line synchronized Hindi subtitles
+Professional Hindi Documentary Automation Pipeline
+- Documentary Milestone Callout Badges (Year / Location / Milestone pills)
+- Fast, readable 1-2 line synchronized Hindi subtitles
 - Energetic SwaraNeural voiceover
-- Watermark elimination & Ken Burns camera motion
+- Context-accurate scene visuals with Ken Burns motion
+- Bottom logo crop filter to eliminate watermarks
 """
 
 import asyncio
@@ -147,60 +147,4 @@ def gemini_json(prompt: str, validate, label: str, max_tokens: int = 16000, temp
 
     sys.exit(f"Gemini script generation timed out for: '{label}'.")
 
-# ==================== Script Processing ====================
-def clean_text(t: str) -> str:
-    t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
-    return re.sub(r"\s+", " ", t).strip()
-
-def check_outline(d) -> str:
-    ch = d.get("chapters") if isinstance(d, dict) else None
-    if not isinstance(ch, list) or not (3 <= len(ch) <= 10):
-        return "need 3 to 10 chapters"
-    if not all(isinstance(c, dict) and c.get("title") and c.get("summary") for c in ch):
-        return "chapter missing title or summary"
-    return None
-
-def make_check_scenes(m: int):
-    def check(d) -> str:
-        sc = d.get("scenes") if isinstance(d, dict) else None
-        if not isinstance(sc, list) or len(sc) < m:
-            return f"need {m} scenes"
-        for s in sc[:m]:
-            if not isinstance(s, dict) or not s.get("narration") or not s.get("image_prompt"):
-                return "scene missing narration or prompt"
-        return None
-    return check
-
-def make_script(topic: str, n_scenes: int) -> dict:
-    k = max(4, min(8, round(n_scenes / 3.5)))
-    log(f"Planning outline for: {topic}")
-    outline = gemini_json(
-        f"You are writing a premium YouTube documentary in Hindi.\nTopic: {topic}\n"
-        f"Divide into {k} chapters in chronological storytelling order.\n"
-        'Return JSON: {"title": "Hindi Title", "description": "Hindi summary", '
-        '"chapters": [{"title": "short English title", "summary": "brief summary"}]}',
-        check_outline,
-        label="outline",
-    )
-    chapters = outline["chapters"]
-    k = len(chapters)
-    counts = [n_scenes // k + (1 if i < (n_scenes % k) else 0) for i in range(k)]
-    outline_text = "\n".join(f"{i + 1}. {c['title']}: {c['summary']}" for i, c in enumerate(chapters))
-    scenes, prev = [], ""
-
-    for i, (ch, m) in enumerate(zip(chapters, counts)):
-        log(f"Writing chapter {i + 1}/{k}: {ch['title']} ({m} scenes)")
-        prompt = (
-            f"Topic: {topic}\nOutline:\n{outline_text}\n"
-            + (f"Previous scene:\n{prev}\n" if prev else "")
-            + f"Write chapter {i + 1}/{k}: {ch['title']} ({m} scenes).\n"
-            "Rules:\n"
-            "- narration: spoken Hindi in Devanagari, engaging tone, exactly 25-35 words per scene.\n"
-            "- image_prompt: A direct, specific scene description in English matching the exact events (historical objects, people, vintage machinery, vintage architecture, cinematic dramatic lighting). NO text or logos.\n"
-            "- callout: An informative 2-4 word milestone badge (Year, Date, Person, Location, or Key Turning Point) to display on-screen. If no milestone, keep it an empty string \"\".\n"
-            'Return JSON only: {"scenes": [{"narration": "", "image_prompt": "", "callout": ""}]}'
-        )
-        data = gemini_json(prompt, make_check_scenes(m), label=f"chapter {i + 1}/{k}")
-        for s in data["scenes"][:m]:
-            scenes.append({
-        
+#
