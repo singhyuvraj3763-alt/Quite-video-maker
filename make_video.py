@@ -1,8 +1,9 @@
 """
-Hindi Documentary Automation Pipeline
-- Energetic narration pacing (+12% rate)
-- Dynamic timed Hindi subtitles (Captions)
-- Distinct visual per scene with Ken Burns motion
+Professional Hindi Documentary Automation Pipeline
+- Documentary Milestone Callout Badges (Year / Location / Milestone pills)
+- Fast, readable 1-2 line synchronized Hindi subtitles
+- Energetic SwaraNeural voiceover
+- Context-accurate scene visuals with Ken Burns motion
 - Bottom logo crop filter to eliminate watermarks
 """
 
@@ -30,12 +31,7 @@ DEFAULT_MODELS = [
 ]
 
 VOICE = os.environ.get("VOICE", "hi-IN-SwaraNeural")
-VOICE_RATE = "+12%"  # Energetic, engaging pace
-
-STYLE = (
-    "cinematic documentary photography, archival realism, muted warm tones, "
-    "dramatic lighting, 8k, photorealistic, 16:9, clean composition, no text"
-)
+VOICE_RATE = "+10%"
 
 WORK = Path("work")
 OUT = Path("out")
@@ -56,7 +52,7 @@ _discovered = []
 def gemini_key() -> str:
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
-        fatal("GEMINI_API_KEY is missing in repo secrets.")
+        fatal("GEMINI_API_KEY is missing.")
     return key
 
 def list_models(key: str) -> list:
@@ -122,7 +118,7 @@ def gemini_json(prompt: str, validate, label: str, max_tokens: int = 16000, temp
                 try:
                     r = requests.post(url, headers=headers, json=body, timeout=180)
                 except Exception as e:
-                    log(f"[{label}] network retry with {model}: {e!r}")
+                    log(f"[{label}] retry with {model}: {e!r}")
                     time.sleep(5 * attempt)
                     continue
 
@@ -147,7 +143,7 @@ def gemini_json(prompt: str, validate, label: str, max_tokens: int = 16000, temp
             found = list_models(key)
             _discovered = [m for m in found if m not in DEFAULT_MODELS]
 
-        time.sleep(20)
+        time.sleep(15)
 
     sys.exit(f"Gemini script generation timed out for: '{label}'.")
 
@@ -179,7 +175,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
     k = max(4, min(8, round(n_scenes / 3.5)))
     log(f"Planning outline for: {topic}")
     outline = gemini_json(
-        f"You are creating a fast-paced, engaging Hindi YouTube documentary.\nTopic: {topic}\n"
+        f"You are writing a premium YouTube documentary in Hindi.\nTopic: {topic}\n"
         f"Divide into {k} chapters in chronological storytelling order.\n"
         'Return JSON: {"title": "Hindi Title", "description": "Hindi summary", '
         '"chapters": [{"title": "short English title", "summary": "brief summary"}]}',
@@ -196,12 +192,13 @@ def make_script(topic: str, n_scenes: int) -> dict:
         log(f"Writing chapter {i + 1}/{k}: {ch['title']} ({m} scenes)")
         prompt = (
             f"Topic: {topic}\nOutline:\n{outline_text}\n"
-            + (f"Previous scene text:\n{prev}\n" if prev else "")
+            + (f"Previous scene:\n{prev}\n" if prev else "")
             + f"Write chapter {i + 1}/{k}: {ch['title']} ({m} scenes).\n"
             "Rules:\n"
-            "- narration: spoken Hindi in Devanagari, engaging documentary tone, 35-45 words per scene.\n"
-            "- image_prompt: specific, highly distinct visual description in English describing the exact moment.\n"
-            'Return JSON only: {"scenes": [{"narration": "", "image_prompt": ""}]}'
+            "- narration: spoken Hindi in Devanagari, engaging tone, exactly 25-35 words per scene.\n"
+            "- image_prompt: A direct, specific scene description in English matching the exact events (historical objects, people, vintage machinery, vintage buildings, dramatic lighting). NO text or logos.\n"
+            "- callout: An informative 2-4 word milestone badge in English/Hindi for on-screen documentary graphics whenever a year, date, person, or location appears (e.g., '1945 • Bombay', 'Willys Jeep Deal', '1947 • Partition', '1993 • Scorpio Launch'). If no milestone, keep it an empty string \"\".\n"
+            'Return JSON only: {"scenes": [{"narration": "", "image_prompt": "", "callout": ""}]}'
         )
         data = gemini_json(prompt, make_check_scenes(m), label=f"chapter {i + 1}/{k}")
         for s in data["scenes"][:m]:
@@ -209,6 +206,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
                 "chapter": ch["title"],
                 "narration": clean_text(s["narration"]),
                 "image_prompt": clean_text(s["image_prompt"]),
+                "callout": clean_text(s.get("callout", "")),
             })
         prev = scenes[-1]["narration"]
         time.sleep(1)
@@ -237,38 +235,28 @@ def fit_cover(img: Image.Image) -> Image.Image:
 def fetch_image(prompt: str, path: Path, seed: int) -> bool:
     key = os.environ.get("POLLINATIONS_API_KEY", "").strip()
     headers = {"Authorization": f"Bearer {key}"} if key else {}
-    
-    # Clean and simplify prompt
-    clean_p = quote(f"{prompt[:200]}, {STYLE}", safe="")
-    
-    # 1. Try Pollinations Flux with seed
-    p_url = f"https://image.pollinations.ai/prompt/{clean_p}"
-    params = {"width": 1280, "height": 720, "seed": seed, "nologo": "true", "model": "flux"}
-    if key:
-        params["key"] = key
 
-    try:
-        r = requests.get(p_url, params=params, headers=headers, timeout=35)
-        if r.status_code == 200 and len(r.content) > 8000:
-            img = Image.open(io.BytesIO(r.content)).convert("RGB")
-            fit_cover(img).save(path, quality=92)
-            return True
-    except Exception:
-        pass
+    words = [w for w in re.findall(r"\b\w+\b", prompt) if len(w) > 2][:14]
+    subject = " ".join(words)
+    style_suffix = "historical documentary photography, archival realism, cinematic dramatic lighting, 8k, sharp focus, 16:9"
+    full_prompt = f"{subject}, {style_suffix}"
+    clean_p = quote(full_prompt, safe="")
 
-    # 2. Unsplash / Picsum Direct Fallback (Guarantees every scene has a unique photo)
-    fallback_urls = [
-        f"https://picsum.photos/1920/1080?random={seed}",
-        f"https://loremflickr.com/1920/1080/documentary,history?lock={seed}"
+    endpoints = [
+        f"https://image.pollinations.ai/prompt/{clean_p}?width=1280&height=720&seed={seed}&nologo=true&model=flux",
+        f"https://image.pollinations.ai/prompt/{clean_p}?width=1280&height=720&seed={seed}&nologo=true&model=turbo",
+        f"https://gen.pollinations.ai/image/{clean_p}?width=1280&height=720&seed={seed}&nologo=true"
     ]
-    for fb in fallback_urls:
+
+    for ep in endpoints:
         try:
-            r = requests.get(fb, timeout=15)
+            r = requests.get(ep, headers=headers, timeout=25)
             if r.status_code == 200 and len(r.content) > 8000:
                 img = Image.open(io.BytesIO(r.content)).convert("RGB")
                 fit_cover(img).save(path, quality=92)
                 return True
         except Exception:
+            time.sleep(2)
             continue
 
     return False
@@ -279,12 +267,16 @@ def generate_images(scenes: list) -> list:
     for i, sc in enumerate(scenes):
         img = WORK / f"img_{i:03d}.jpg"
         if not (img.exists() and img.stat().st_size > 5000):
-            log(f"Generating Image {i + 1}/{n}...")
-            ok = fetch_image(sc["image_prompt"], img, seed=2000 + (i * 13))
+            log(f"Generating Image {i + 1}/{n}: {sc['image_prompt'][:50]}...")
+            ok = fetch_image(sc["image_prompt"], img, seed=3500 + (i * 17))
             if not ok:
-                # Emergency slate
-                cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#1b263b:s={W}x{H}:d=1", "-frames:v", "1", str(img)]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                prev_img = WORK / f"img_{i-1:03d}.jpg"
+                if prev_img.exists():
+                    import shutil
+                    shutil.copy(prev_img, img)
+                else:
+                    cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#1b263b:s={W}x{H}:d=1", "-frames:v", "1", str(img)]
+                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         paths.append(img)
         time.sleep(0.5)
     return paths
@@ -292,7 +284,6 @@ def generate_images(scenes: list) -> list:
 # ==================== Voiceover Engine ====================
 async def _edge(text: str, path: Path) -> None:
     import edge_tts
-    # SwaraNeural is dynamic and punchy, paced with VOICE_RATE
     await edge_tts.Communicate(text, VOICE, rate=VOICE_RATE).save(str(path))
 
 def audio_duration(path: Path) -> float:
@@ -315,11 +306,10 @@ def speak(text: str, path: Path) -> None:
         except Exception as e:
             log(f"Edge-TTS attempt {attempt + 1} failed: {e!r}")
             time.sleep(2)
-    # gTTS fallback
     from gtts import gTTS
     gTTS(text, lang="hi").save(str(path))
 
-# ==================== Subtitles & Captions ====================
+# ==================== Dynamic Subtitles ====================
 def format_srt_time(sec: float) -> str:
     millis = int((sec % 1) * 1000)
     s = int(sec)
@@ -330,25 +320,31 @@ def format_srt_time(sec: float) -> str:
 def create_subtitles(scenes: list, durs: list, srt_path: Path):
     cur_time = 0.0
     lines = []
-    for idx, (sc, dur) in enumerate(zip(scenes, durs), start=1):
-        start = cur_time
-        end = cur_time + dur
-        cur_time = end
+    sub_idx = 1
 
-        # Split Hindi text into readable two-line chunks if long
+    for sc, dur in zip(scenes, durs):
+        scene_start = cur_time
+        scene_end = cur_time + dur
+        cur_time = scene_end
+
         words = sc["narration"].split()
-        if len(words) > 10:
-            mid = len(words) // 2
-            text = " ".join(words[:mid]) + "\n" + " ".join(words[mid:])
-        else:
-            text = sc["narration"]
+        chunk_size = 7
+        chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
+        if not chunks:
+            continue
 
-        lines.append(f"{idx}\n{format_srt_time(start)} --> {format_srt_time(end)}\n{text}\n")
+        chunk_dur = dur / len(chunks)
+        for i, chk in enumerate(chunks):
+            c_start = scene_start + (i * chunk_dur)
+            c_end = c_start + chunk_dur
+            text = " ".join(chk)
+            lines.append(f"{sub_idx}\n{format_srt_time(c_start)} --> {format_srt_time(c_end)}\n{text}\n")
+            sub_idx += 1
 
     srt_path.write_text("\n".join(lines), encoding="utf-8")
 
-# ==================== Compositing & Motion ====================
-def motion(i: int, frames: int) -> str:
+# ==================== Motion & Callout Video Compositing ====================
+def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> str:
     f = frames
     cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
     styles = [
@@ -359,19 +355,32 @@ def motion(i: int, frames: int) -> str:
     ]
     z, x, y = styles[i % 4]
     
-    # 1) Crop bottom 45px to eliminate any watermark logo
-    # 2) Scale to high res and apply zoompan motion
-    return (
+    # 1. Base Motion: Crop bottom 45px to remove watermarks, upscale, zoompan
+    vf = (
         f"crop=iw:ih-45:0:0,"
         f"scale=3840:2160:flags=lanczos,"
         f"zoompan=z='{z}':x='{x}':y='{y}':d={f}:s={W}x{H}:fps={FPS},format=yuv420p"
     )
 
-def render_clip(img: Path, aud: Path, clip: Path, i: int, dur: float) -> None:
+    # 2. Milestone Callout Pill (Appears at top-left for the first 4.5 seconds)
+    if callout and len(callout.strip()) > 1:
+        clean_callout = callout.replace("'", "").replace(":", "-").replace('"', "").upper()
+        # Displays an elegant semi-transparent black pill box with bright white text and red accent bar
+        badge_duration = min(4.5, dur - 0.5) if dur > 2 else dur
+        vf += (
+            f",drawbox=x=80:y=80:w=min(text_w+50\\,800):h=64:color=black@0.75:t=fill:enable='between(t,0.5,{badge_duration})'"
+            f",drawbox=x=80:y=80:w=6:h=64:color=#E63946:t=fill:enable='between(t,0.5,{badge_duration})'"
+            f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=24:x=105:y=100:"
+            f"font='Noto Sans':enable='between(t,0.5,{badge_duration})'"
+        )
+
+    return vf
+
+def render_clip(img: Path, aud: Path, clip: Path, i: int, dur: float, callout: str) -> None:
     tmp = clip.with_name(clip.stem + ".tmp.mp4")
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error", "-i", str(img), "-i", str(aud),
-        "-vf", motion(i, int(dur * FPS)), "-af", "apad",
+        "-vf", motion_and_callout_filter(i, int(dur * FPS), callout, dur), "-af", "apad",
         "-t", f"{dur:.3f}", "-r", str(FPS),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
         "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k", str(tmp)
@@ -385,27 +394,28 @@ def build_video(data: dict) -> None:
     scenes = data["scenes"]
     n = len(scenes)
 
-    log("=== Step 1/3: Generating Distinct Visuals ===")
+    log("=== Step 1/3: Generating Contextual Visuals ===")
     imgs = generate_images(scenes)
 
-    log("=== Step 2/3: Generating Voiceovers ===")
+    log("=== Step 2/3: Recording Hindi Narration ===")
     auds, durs = [], []
     for i, sc in enumerate(scenes):
         aud = WORK / f"aud_{i:03d}.mp3"
         if not (aud.exists() and aud.stat().st_size > 1000 and audio_duration(aud) > 0.8):
-            log(f"Recording Voice {i + 1}/{n}...")
+            log(f"Recording Scene {i + 1}/{n}...")
             speak(sc["narration"], aud)
         auds.append(aud)
         durs.append(audio_duration(aud) + 0.3)
 
-    log("=== Step 3/3: Rendering Clips with Motion & Subtitles ===")
-    clips, t = [], 0.0
+    log("=== Step 3/3: Rendering Motion, Callout Badges & Subtitles ===")
+    clips = []
     for i in range(n):
         clip = WORK / f"clip_{i:03d}.mp4"
+        callout_text = scenes[i].get("callout", "")
         if not (clip.exists() and clip.stat().st_size > 1000):
-            log(f"Rendering Clip {i + 1}/{n}...")
-            render_clip(imgs[i], auds[i], clip, i, durs[i])
-        t += durs[i]
+            badge_log = f" [Badge: '{callout_text}']" if callout_text else ""
+            log(f"Encoding Scene {i + 1}/{n}{badge_log}...")
+            render_clip(imgs[i], auds[i], clip, i, durs[i], callout_text)
         clips.append(clip)
 
     listfile = WORK / "list.txt"
@@ -418,19 +428,17 @@ def build_video(data: dict) -> None:
         check=True
     )
 
-    # Subtitles track
     srt_path = WORK / "subtitles.srt"
     create_subtitles(scenes, durs, srt_path)
 
-    # Final Burn-in: Add centered documentary-style subtitles
     final = OUT / "final.mp4"
     subtitle_filter = (
         f"subtitles='{srt_path.resolve()}':force_style="
-        "'FontName=Noto Sans Devanagari,FontSize=20,PrimaryColour=&H00FFFFFF,"
-        "BackColour=&H80000000,BorderStyle=4,Outline=0,Shadow=0,MarginV=45,Alignment=2'"
+        "'FontName=Noto Sans Devanagari,FontSize=22,PrimaryColour=&H0000FFFF,"
+        "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=55,Alignment=2'"
     )
 
-    log("Burning in Hindi subtitles...")
+    log("Burning in clean dynamic subtitles...")
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw_concat),
          "-vf", subtitle_filter, "-c:v", "libx264", "-crf", "22", "-preset", "veryfast",
@@ -440,13 +448,12 @@ def build_video(data: dict) -> None:
 
     log(f"COMPLETED! Final video saved to {final}")
 
-# ==================== Main Runner ====================
+# ==================== Main ====================
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "full"
     topic = os.environ.get("TOPIC", "The Mahindra story in Hindi").strip()
     n = int(os.environ.get("SCENES", "24") or 24)
 
-    # Clean old cache when starting a full run
     if mode == "full" and os.environ.get("RESUME") != "1":
         for p in [WORK, OUT]:
             if p.exists():
@@ -471,4 +478,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-          
+        
