@@ -4,7 +4,7 @@ Professional Bilingual (Hindi & English) Documentary Automation Pipeline
 - Seamless English & Hindi support via LANGUAGE environment variable ("hi" or "en")
 - High-retention question hooks and curious storytelling intro
 - Voice tuning: SwaraNeural with +14% rate and +1Hz pitch to eliminate trailing syllable lag
-- High-res Wikimedia Commons archive search with deduplication
+- Randomized Wikimedia Commons search with shuffling & offset rotation to prevent image duplication
 - Universal font auto-discovery supporting both Devanagari and Latin fonts for milestone badges
 - Bottom logo crop filter to eliminate watermarks
 """
@@ -13,6 +13,7 @@ import asyncio
 import io
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -164,7 +165,7 @@ def gemini_json(prompt: str, label: str):
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing with Hooks & Unique Images ====================
+# ==================== Script Processing with Hooks & Emojis ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
@@ -228,9 +229,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
         "scenes": scenes,
     }
 
-# ==================== High-Res Visuals Engine ====================
-_used_image_urls = set()
-
+# ==================== High-Res Visuals Engine with Randomization ====================
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -244,70 +243,65 @@ def fit_cover(img: Image.Image) -> Image.Image:
         img = img.crop((0, top, w, top + nh))
     return img.resize((W, H), Image.LANCZOS)
 
-def search_wikimedia(query: str) -> list:
-    api_url = "https://commons.wikimedia.org/w/api.php"
-    headers = {"User-Agent": "HistoricalDocBot/2.0"}
-    params = {
-        "action": "query",
-        "generator": "search",
-        "gsrsearch": query,
-        "gsrnamespace": 6,
-        "gsrlimit": 8,
-        "prop": "imageinfo",
-        "iiprop": "url|mime",
-        "iiurlwidth": 1280,
-        "format": "json"
-    }
-    found = []
-    try:
-        r = requests.get(api_url, params=params, headers=headers, timeout=12)
-        if r.status_code == 200:
-            pages = r.json().get("query", {}).get("pages", {})
-            for pid, info in pages.items():
-                imginfo = info.get("imageinfo", [{}])[0]
-                mime = imginfo.get("mime", "")
-                url = imginfo.get("thumburl") or imginfo.get("url")
-                if url and ("jpeg" in mime or "png" in mime or "jpg" in mime):
-                    found.append(url)
-    except Exception:
-        pass
-    return found
-
 def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
-    global _used_image_urls
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": "HistoricalDocBot/3.0"}
     prompt = scene_info.get("image_prompt", "")
     words = [w for w in re.findall(r"\b[A-Za-z]+\b", prompt) if len(w) > 2]
     specific_query = " ".join(words[:4]) if words else "Rajasthan history"
     topic_clean = " ".join([w for w in re.findall(r"\b[A-Za-z]+\b", topic) if len(w) > 2][:3])
     
+    fallbacks = [
+        f"{topic_clean} vintage archive painting",
+        f"historical museum artifact {topic_clean}",
+        "Rajasthan royal heritage painting old art",
+        "ancient Indian architecture landmark",
+        "traditional Mewar Marwar miniature artwork"
+    ]
+    random.shuffle(fallbacks)
+
     query_chain = [
         f"{specific_query} Rajasthan",
         specific_query,
-        f"{topic_clean} history painting",
-        "Mehrangarh Fort Jodhpur architecture",
-        "Mandore gardens cenotaphs",
-        "Thar Desert dunes Rajasthan landscape"
-    ]
+    ] + fallbacks
 
     for q in query_chain:
-        urls = search_wikimedia(q)
-        for u in urls:
-            if u not in _used_image_urls:
-                try:
-                    r = requests.get(u, headers=headers, timeout=12)
-                    if r.status_code == 200 and len(r.content) > 25000:
-                        img = Image.open(io.BytesIO(r.content)).convert("RGB")
-                        if img.width >= 800 and img.height >= 500:
-                            fit_cover(img).save(path, quality=94)
-                            _used_image_urls.add(u)
-                            return True
-                except Exception:
-                    continue
+        api_url = "https://commons.wikimedia.org/w/api.php"
+        params = {
+            "action": "query",
+            "generator": "search",
+            "gsrsearch": q,
+            "gsrnamespace": 6,
+            "gsrlimit": 20,
+            "gsroffset": random.randint(0, 10),
+            "prop": "imageinfo",
+            "iiprop": "url|mime",
+            "iiurlwidth": 1280,
+            "format": "json"
+        }
+        try:
+            r = requests.get(api_url, params=params, headers=headers, timeout=12)
+            if r.status_code == 200:
+                pages = r.json().get("query", {}).get("pages", {})
+                page_items = list(pages.items())
+                random.shuffle(page_items)
+                
+                for pid, info in page_items:
+                    imginfo = info.get("imageinfo", [{}])[0]
+                    mime = imginfo.get("mime", "")
+                    url = imginfo.get("thumburl") or imginfo.get("url")
+                    if url and ("jpeg" in mime or "png" in mime or "jpg" in mime):
+                        img_resp = requests.get(url, headers=headers, timeout=10)
+                        if img_resp.status_code == 200 and len(img_resp.content) > 30000:
+                            img = Image.open(io.BytesIO(img_resp.content)).convert("RGB")
+                            if img.width >= 800 and img.height >= 500:
+                                fit_cover(img).save(path, quality=94)
+                                return True
+        except Exception:
+            continue
 
     core_kw = " ".join(words[:5]) if words else "historical architecture Rajasthan"
     safe_prompt = quote(f"{core_kw}, cinematic documentary still, national geographic style, 8k, sharp focus")
-    ai_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=1280&height=720&seed={seed}&nologo=true&model=turbo"
+    ai_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=1280&height=720&seed={seed + random.randint(1,9999)}&nologo=true&model=turbo"
     try:
         r = requests.get(ai_url, headers=headers, timeout=14)
         if r.status_code == 200 and len(r.content) > 12000:
