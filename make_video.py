@@ -1,12 +1,13 @@
 """
-Professional Hindi Documentary Automation Pipeline
+Professional Bilingual (Hindi & English) Documentary Automation Pipeline
 - Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
-- Archival-first visual engine (Wikimedia Commons + Quality-gated AI fallback)
-- Safe prompt engineering to prevent distorted, warped figures
+- Seamless English & Hindi support via LANGUAGE environment variable ("hi" or "en")
+- High-res Wikimedia Commons archive search with deduplication
+- Quality-gated AI fallback (prevents distorted/melted figures)
 - Devanagari font auto-discovery to prevent tofu boxes in milestone badges
 - Fast single-pass structured script generation
-- Synchronized yellow 1-2 line captions
-- Energetic SwaraNeural voiceover (+10% rate)
+- Synchronized yellow captions (1-2 lines)
+- Natural documentary narration (SwaraNeural for Hindi, ChristopherNeural for English)
 - Bottom logo crop filter to eliminate watermarks
 """
 
@@ -27,7 +28,17 @@ FPS = 25
 W, H = 1920, 1080
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
-VOICE = os.environ.get("VOICE", "hi-IN-SwaraNeural")
+# ==================== Language & Voice Setup ====================
+LANGUAGE = os.environ.get("LANGUAGE", "hi").strip().lower()  # "hi" or "en"
+
+if LANGUAGE == "en":
+    DEFAULT_VOICE = "en-US-ChristopherNeural"
+    DEFAULT_FONT = "DejaVu Sans"
+else:
+    DEFAULT_VOICE = "hi-IN-SwaraNeural"
+    DEFAULT_FONT = "Noto Sans Devanagari"
+
+VOICE = os.environ.get("VOICE", DEFAULT_VOICE)
 VOICE_RATE = "+10%"
 
 WORK = Path("work")
@@ -43,26 +54,24 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 # ==================== Font Discovery ====================
-def get_devanagari_font_path() -> str:
-    """Locates the absolute path to Noto Sans Devanagari TTF to prevent tofu boxes in FFmpeg."""
-    candidates = [
+def get_font_path() -> tuple:
+    """Locates system fonts to prevent tofu boxes in FFmpeg badges."""
+    devanagari_candidates = [
         "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Bold.otf",
         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
     ]
-    for c in candidates:
+    for c in devanagari_candidates:
         if os.path.exists(c):
-            return c
+            return c, "Noto Sans Devanagari"
     for p in Path("/usr/share/fonts").rglob("*Devanagari*.ttf"):
-        return str(p)
-    return ""
+        return str(p), "Noto Sans Devanagari"
+    return "", DEFAULT_FONT
 
-FONT_FILE = get_devanagari_font_path()
-if FONT_FILE:
-    log(f"Devanagari font loaded: {FONT_FILE}")
-else:
-    log("::warning:: Devanagari TTF not found directly on disk, fallback to font name.")
+FONT_FILE, FONT_NAME = get_font_path()
+if FONT_FILE and LANGUAGE == "hi":
+    log(f"Font loaded: {FONT_FILE}")
 
 # ==================== Dynamic Gemini Script Engine ====================
 _good_model = None
@@ -174,21 +183,35 @@ def clean_text(t: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 def make_script(topic: str, n_scenes: int) -> dict:
-    log(f"Generating full script in one go for topic: {topic} ({n_scenes} scenes)")
+    log(f"Generating full script in {LANGUAGE.upper()} for: {topic} ({n_scenes} scenes)")
+    
+    if LANGUAGE == "en":
+        lang_rules = (
+            "- title: Engaging English documentary title.\n"
+            "- description: 2-3 sentence English summary.\n"
+            "- narration: Compelling spoken English documentary narration, exactly 28-36 words per scene.\n"
+            "- callout: 2-4 word milestone badge in English for dates, key figures, or landmarks (e.g., '1459 • Mehrangarh Fort', '1544 • Battle of Sammel'). Leave empty \"\" if no milestone.\n"
+        )
+    else:
+        lang_rules = (
+            "- title: Engaging Hindi documentary title.\n"
+            "- description: 2-3 sentence Hindi summary.\n"
+            "- narration: Natural spoken Hindi in Devanagari script, exactly 25-35 words per scene.\n"
+            "- callout: 2-4 word milestone badge in Hindi/English for dates, rulers, battles, or places (e.g. '1459 • मेहरानगढ़ दुर्ग', '1544 • सुमेल युद्ध'). Leave empty \"\" if no milestone.\n"
+        )
+
     prompt = (
-        f"You are writing a premium, fast-paced YouTube documentary script in Hindi.\n"
+        f"You are writing a premium, fast-paced YouTube documentary script.\n"
         f"Topic: {topic}\n"
+        f"Language: {'English' if LANGUAGE == 'en' else 'Hindi'}\n"
         f"Create exactly {n_scenes} scenes in chronological order covering the complete story.\n"
         "Rules:\n"
-        "- title: engaging Hindi documentary title.\n"
-        "- description: 2-3 sentence Hindi summary.\n"
-        "- narration: natural spoken Hindi in Devanagari script, exactly 25-35 words per scene.\n"
-        "- image_prompt: 3-5 specific English keywords focused on majestic architectural views, historical artifacts, vintage maps, royal durbars, weapons/armor, or landscapes. AVOID complex action shots like riders mounted on galloping horses to prevent AI distortion. Examples: 'Mehrangarh Fort Jodhpur exterior', 'Ancient Rajput sword and shield artifact', 'Mandore cenotaphs architecture', 'Vintage historical map of Marwar', 'Thar desert golden hour landscape', 'Royal Rajput throne durbar'. No text or logos.\n"
-        "- callout: 2-4 word milestone badge in Hindi/English for dates, rulers, battles, or places (e.g. '1459 • मेहरानगढ़ दुर्ग', '1544 • सुमेल युद्ध', 'राव मालदेव'). Keep empty \"\" if no milestone.\n"
+        f"{lang_rules}"
+        "- image_prompt: 3-5 specific English keywords focused on majestic architectural views, historical artifacts, vintage maps, royal durbars, weapons/armor, or landscapes. AVOID complex action shots like riders mounted on galloping horses. Examples: 'Mehrangarh Fort Jodhpur exterior', 'Ancient Rajput sword and shield artifact', 'Mandore cenotaphs architecture'. No text or logos.\n"
         "Return pure JSON:\n"
         '{\n'
-        '  "title": "Hindi Title",\n'
-        '  "description": "Hindi summary",\n'
+        '  "title": "Title",\n'
+        '  "description": "Summary",\n'
         '  "scenes": [\n'
         '    {"narration": "...", "image_prompt": "...", "callout": "..."}\n'
         '  ]\n'
@@ -307,7 +330,6 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
             return True
     except Exception:
         pass
-
     return False
 def generate_images(scenes: list, topic: str) -> list:
     n = len(scenes)
@@ -357,7 +379,7 @@ def speak(text: str, path: Path) -> None:
             log(f"Edge-TTS attempt {attempt + 1} failed: {e!r}")
             time.sleep(2)
     from gtts import gTTS
-    gTTS(text, lang="hi").save(str(path))
+    gTTS(text, lang=LANGUAGE).save(str(path))
 
 # ==================== Dynamic Subtitles ====================
 def format_srt_time(sec: float) -> str:
@@ -405,6 +427,7 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     ]
     z, x, y = styles[i % 4]
 
+    # Watermark bottom 45px slice and Ken Burns motion
     vf = (
         f"crop=iw:ih-45:0:0,"
         f"scale=3840:2160:flags=lanczos,"
@@ -423,7 +446,7 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
         badge_duration = min(4.5, dur - 0.5) if dur > 2 else dur
         box_w = max(240, min(800, len(clean_callout) * 16 + 50))
         
-        font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else "font='Noto Sans Devanagari'"
+        font_opt = f"fontfile='{FONT_FILE}'" if (FONT_FILE and LANGUAGE == "hi") else f"font='{FONT_NAME}'"
 
         vf += (
             f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.75:t=fill:enable='between(t,0.5,{badge_duration})'"
@@ -456,7 +479,7 @@ def build_video(data: dict) -> None:
     log("=== Step 1/3: Generating Distinct Scene Visuals ===")
     imgs = generate_images(scenes, topic=topic)
 
-    log("=== Step 2/3: Recording Hindi Narration ===")
+    log("=== Step 2/3: Recording Narration ===")
     auds, durs = [], []
     for i, sc in enumerate(scenes):
         aud = WORK / f"aud_{i:03d}.mp3"
@@ -491,9 +514,12 @@ def build_video(data: dict) -> None:
     create_subtitles(scenes, durs, srt_path)
 
     final = OUT / "final.mp4"
+    
+    # Subtitle font configuration based on language
+    sub_font = "Noto Sans Devanagari" if LANGUAGE == "hi" else "DejaVu Sans"
     subtitle_filter = (
         f"subtitles='{srt_path.resolve()}':force_style="
-        "'FontName=Noto Sans Devanagari,FontSize=22,PrimaryColour=&H0000FFFF,"
+        f"'FontName={sub_font},FontSize=22,PrimaryColour=&H0000FFFF,"
         "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=55,Alignment=2'"
     )
 
@@ -537,4 +563,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
+        
