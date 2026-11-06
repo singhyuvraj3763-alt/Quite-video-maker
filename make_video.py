@@ -309,7 +309,7 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
         pass
 
     return False
-    def generate_images(scenes: list, topic: str) -> list:
+def generate_images(scenes: list, topic: str) -> list:
     n = len(scenes)
     paths = []
     for i, sc in enumerate(scenes):
