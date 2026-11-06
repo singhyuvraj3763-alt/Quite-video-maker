@@ -1,10 +1,11 @@
 """
 Professional Hindi Documentary Automation Pipeline
 - Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
-- Zero-watermark archival & AI visual pipeline (Wikimedia Commons + Pollinations fallback)
+- Archival-first visual engine (Wikimedia Commons + Quality-gated AI fallback)
+- Safe prompt engineering to prevent distorted, warped figures
+- Devanagari font auto-discovery to prevent tofu boxes in milestone badges
 - Fast single-pass structured script generation
-- Milestone Callout Badges with Devanagari font support & safe FFmpeg escaping
-- Fast, readable 1-2 line synchronized Hindi subtitles
+- Synchronized yellow 1-2 line captions
 - Energetic SwaraNeural voiceover (+10% rate)
 - Bottom logo crop filter to eliminate watermarks
 """
@@ -40,6 +41,28 @@ def fatal(msg: str) -> None:
 
 def log(msg: str) -> None:
     print(msg, flush=True)
+
+# ==================== Font Discovery ====================
+def get_devanagari_font_path() -> str:
+    """Locates the absolute path to Noto Sans Devanagari TTF to prevent tofu boxes in FFmpeg."""
+    candidates = [
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Bold.otf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    for p in Path("/usr/share/fonts").rglob("*Devanagari*.ttf"):
+        return str(p)
+    return ""
+
+FONT_FILE = get_devanagari_font_path()
+if FONT_FILE:
+    log(f"Devanagari font loaded: {FONT_FILE}")
+else:
+    log("::warning:: Devanagari TTF not found directly on disk, fallback to font name.")
 
 # ==================== Dynamic Gemini Script Engine ====================
 _good_model = None
@@ -160,8 +183,8 @@ def make_script(topic: str, n_scenes: int) -> dict:
         "- title: engaging Hindi documentary title.\n"
         "- description: 2-3 sentence Hindi summary.\n"
         "- narration: natural spoken Hindi in Devanagari script, exactly 25-35 words per scene.\n"
-        "- image_prompt: detailed visual description in English of the exact moment/location/artifacts. No text or logos.\n"
-        "- callout: 2-4 word milestone badge in English/Hindi for dates, rulers, battles, or places (e.g. '1459 • Mehrangarh Fort', '1544 • Battle of Sammel', 'Rao Maldeo'). Keep empty \"\" if no milestone.\n"
+        "- image_prompt: 3-5 specific English keywords focused on majestic architectural views, historical artifacts, vintage maps, royal durbars, weapons/armor, or landscapes. AVOID complex action shots like riders mounted on galloping horses to prevent AI distortion. Examples: 'Mehrangarh Fort Jodhpur exterior', 'Ancient Rajput sword and shield artifact', 'Mandore cenotaphs architecture', 'Vintage historical map of Marwar', 'Thar desert golden hour landscape', 'Royal Rajput throne durbar'. No text or logos.\n"
+        "- callout: 2-4 word milestone badge in Hindi/English for dates, rulers, battles, or places (e.g. '1459 • मेहरानगढ़ दुर्ग', '1544 • सुमेल युद्ध', 'राव मालदेव'). Keep empty \"\" if no milestone.\n"
         "Return pure JSON:\n"
         '{\n'
         '  "title": "Hindi Title",\n'
@@ -188,7 +211,9 @@ def make_script(topic: str, n_scenes: int) -> dict:
         "scenes": scenes,
     }
 
-# ==================== High-Res Visuals Engine (Wikimedia + AI) ====================
+# ==================== High-Res Visuals Engine ====================
+_used_image_urls = set()
+
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -202,103 +227,106 @@ def fit_cover(img: Image.Image) -> Image.Image:
         img = img.crop((0, top, w, top + nh))
     return img.resize((W, H), Image.LANCZOS)
 
-def search_wikimedia_highres(query: str) -> str:
-    """Finds genuine historical, high-resolution original images on Wikimedia Commons."""
+def search_wikimedia(query: str) -> list:
+    """Searches Wikimedia Commons File namespace (gsrnamespace=6) for 1280px web-ready images."""
     api_url = "https://commons.wikimedia.org/w/api.php"
-    headers = {"User-Agent": "HistoricalDocBot/2.0 (educational automated pipeline)"}
+    headers = {"User-Agent": "HistoricalDocBot/2.0 (contact: admin@marwarhist.org)"}
     params = {
         "action": "query",
         "generator": "search",
-        "gsrsearch": f"{query} filetype:bitmap",
-        "gsrlimit": 5,
+        "gsrsearch": query,
+        "gsrnamespace": 6,
+        "gsrlimit": 8,
         "prop": "imageinfo",
-        "iiprop": "url|size|mime",
+        "iiprop": "url|mime",
+        "iiurlwidth": 1280,
         "format": "json"
     }
+    found = []
     try:
-        r = requests.get(api_url, params=params, headers=headers, timeout=10)
+        r = requests.get(api_url, params=params, headers=headers, timeout=12)
         if r.status_code == 200:
             pages = r.json().get("query", {}).get("pages", {})
             for pid, info in pages.items():
                 imginfo = info.get("imageinfo", [{}])[0]
                 mime = imginfo.get("mime", "")
-                width = imginfo.get("width", 0)
-                height = imginfo.get("height", 0)
-                url = imginfo.get("url", "")
-                
-                # Check for high-resolution raster file (no SVGs or tiny icons)
-                if ("jpeg" in mime or "png" in mime or "jpg" in mime) and width >= 1024 and height >= 600:
-                    return url
+                url = imginfo.get("thumburl") or imginfo.get("url")
+                if url and ("jpeg" in mime or "png" in mime or "jpg" in mime):
+                    found.append(url)
     except Exception:
         pass
-    return ""
+    return found
 
-def fetch_image(prompt: str, path: Path, seed: int) -> bool:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
+    global _used_image_urls
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-    stop_words = {"cinematic", "dramatic", "shot", "view", "scene", "historical", "lighting", "ultra", "realistic"}
-    words = [w for w in re.findall(r"\b[A-Za-z]+\b", prompt) if len(w) > 3 and w.lower() not in stop_words]
-    core_search = " ".join(words[:4]) if words else "Rajasthan history"
-
-    # Step 1: Wikimedia Commons high-resolution public archive search
-    wiki_url = search_wikimedia_highres(core_search)
-    if wiki_url:
-        try:
-            r = requests.get(wiki_url, headers=headers, timeout=14)
-            if r.status_code == 200 and len(r.content) > 25000:
-                img = Image.open(io.BytesIO(r.content)).convert("RGB")
-                if img.width >= 800 and img.height >= 500:
-                    fit_cover(img).save(path, quality=92)
-                    return True
-        except Exception:
-            pass
-
-    # Step 2: High-Quality Direct AI Generation
-    clean_prompt = quote(f"{' '.join(words[:8])}, authentic documentary photography, 35mm archival realism, 16:9")
-    ai_urls = [
-        f"https://image.pollinations.ai/prompt/{clean_prompt}?width=1280&height=720&seed={seed}&nologo=true&model=turbo",
-        f"https://image.pollinations.ai/prompt/{quote(' '.join(words[:6]))}?width=1280&height=720&seed={seed+9}&nologo=true"
+    prompt = scene_info.get("image_prompt", "")
+    words = [w for w in re.findall(r"\b[A-Za-z]+\b", prompt) if len(w) > 2]
+    
+    specific_query = " ".join(words[:4]) if words else "Rajasthan history"
+    topic_clean = " ".join([w for w in re.findall(r"\b[A-Za-z]+\b", topic) if len(w) > 2][:3])
+    
+    query_chain = [
+        f"{specific_query} Rajasthan",
+        specific_query,
+        f"{topic_clean} history painting",
+        "Mehrangarh Fort Jodhpur architecture",
+        "Mandore gardens cenotaphs",
+        "Thar Desert dunes Rajasthan landscape"
     ]
 
-    for url in ai_urls:
-        try:
-            r = requests.get(url, headers=headers, timeout=16)
-            if r.status_code == 200 and len(r.content) > 8000:
-                img = Image.open(io.BytesIO(r.content)).convert("RGB")
-                fit_cover(img).save(path, quality=92)
-                return True
-        except Exception:
-            time.sleep(1.5)
-            continue
+    for q in query_chain:
+        urls = search_wikimedia(q)
+        for u in urls:
+            if u not in _used_image_urls:
+                try:
+                    r = requests.get(u, headers=headers, timeout=12)
+                    if r.status_code == 200 and len(r.content) > 25000:
+                        img = Image.open(io.BytesIO(r.content)).convert("RGB")
+                        if img.width >= 800 and img.height >= 500:
+                            fit_cover(img).save(path, quality=94)
+                            _used_image_urls.add(u)
+                            return True
+                except Exception:
+                    continue
+
+    core_kw = " ".join(words[:5]) if words else "historical architecture Rajasthan"
+    safe_prompt = quote(
+        f"{core_kw}, cinematic documentary still, national geographic style, architectural photography, 8k, sharp focus, masterpiece"
+    )
+    ai_url = (
+        f"https://image.pollinations.ai/prompt/{safe_prompt}"
+        f"?width=1280&height=720&seed={seed}&nologo=true&model=turbo"
+    )
+    try:
+        r = requests.get(ai_url, headers=headers, timeout=14)
+        if r.status_code == 200 and len(r.content) > 12000:
+            img = Image.open(io.BytesIO(r.content)).convert("RGB")
+            fit_cover(img).save(path, quality=92)
+            return True
+    except Exception:
+        pass
 
     return False
-
-def generate_images(scenes: list) -> list:
+    def generate_images(scenes: list, topic: str) -> list:
     n = len(scenes)
     paths = []
     for i, sc in enumerate(scenes):
         img = WORK / f"img_{i:03d}.jpg"
         if not (img.exists() and img.stat().st_size > 5000):
-            log(f"Fetching Scene Visual {i + 1}/{n}: {sc['image_prompt'][:45]}...")
-            ok = fetch_image(sc["image_prompt"], img, seed=7000 + (i * 31))
-            
+            log(f"Fetching Distinct Visual {i + 1}/{n}: {sc['image_prompt'][:45]}...")
+            ok = fetch_image(sc, img, seed=8000 + (i * 47), topic=topic)
             if not ok:
-                log(f"::warning:: Visual {i + 1} fallback engaged.")
-                prev = WORK / f"img_{i-1:03d}.jpg"
-                if prev.exists() and prev.stat().st_size > 5000:
-                    import shutil
-                    shutil.copy(prev, img)
-                else:
-                    cmd = [
-                        "ffmpeg", "-y", "-f", "lavfi",
-                        "-i", f"color=c=#101820:s={W}x{H}:d=1",
-                        "-frames:v", "1", str(img)
-                    ]
-                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                log(f"::warning:: Generating fallback slate for scene {i + 1}.")
+                cmd = [
+                    "ffmpeg", "-y", "-f", "lavfi",
+                    "-i", f"color=c=#141c26:s={W}x{H}:d=1",
+                    "-frames:v", "1", str(img)
+                ]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            time.sleep(2.5)
+            time.sleep(1.5)
 
         paths.append(img)
     return paths
@@ -377,7 +405,6 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     ]
     z, x, y = styles[i % 4]
 
-    # Watermark bottom 45px slice and Ken Burns motion
     vf = (
         f"crop=iw:ih-45:0:0,"
         f"scale=3840:2160:flags=lanczos,"
@@ -395,11 +422,14 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
         )
         badge_duration = min(4.5, dur - 0.5) if dur > 2 else dur
         box_w = max(240, min(800, len(clean_callout) * 16 + 50))
+        
+        font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else "font='Noto Sans Devanagari'"
+
         vf += (
             f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.75:t=fill:enable='between(t,0.5,{badge_duration})'"
             f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.5,{badge_duration})'"
             f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=22:x=102:y=98:"
-            f"font='Noto Sans Devanagari':enable='between(t,0.5,{badge_duration})'"
+            f"{font_opt}:enable='between(t,0.5,{badge_duration})'"
         )
 
     return vf
@@ -420,10 +450,11 @@ def build_video(data: dict) -> None:
     WORK.mkdir(exist_ok=True)
     OUT.mkdir(exist_ok=True)
     scenes = data["scenes"]
+    topic = data.get("topic", "History")
     n = len(scenes)
 
     log("=== Step 1/3: Generating Distinct Scene Visuals ===")
-    imgs = generate_images(scenes)
+    imgs = generate_images(scenes, topic=topic)
 
     log("=== Step 2/3: Recording Hindi Narration ===")
     auds, durs = [], []
