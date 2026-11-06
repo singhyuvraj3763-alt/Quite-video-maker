@@ -28,7 +28,7 @@ from PIL import Image, ImageDraw
 
 FPS = 25
 W, H = 1920, 1080
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-3.8-flash"
 VOICE = os.environ.get("VOICE", "hi-IN-MadhurNeural")
 STYLE = (
     "cinematic documentary illustration, painterly digital art, muted warm "
@@ -73,7 +73,6 @@ def gemini_script(topic: str, n_scenes: int) -> dict:
         'description", "scenes": [{"chapter": "", "narration": "", '
         '"image_prompt": ""}]}'
     )
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -82,27 +81,69 @@ def gemini_script(topic: str, n_scenes: int) -> dict:
             "maxOutputTokens": 32000,
         },
     }
-    for attempt in range(4):
-        try:
-            r = requests.post(
-                url,
-                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-                json=body,
-                timeout=300,
-            )
-            if r.status_code == 200:
-                parts = r.json()["candidates"][0]["content"]["parts"]
-                text = "".join(p.get("text", "") for p in parts)
-                data = json.loads(text)
-                assert data["scenes"] and all(
-                    {"chapter", "narration", "image_prompt"} <= set(s) for s in data["scenes"]
-                )
-                return data
-            print("Gemini error", r.status_code, r.text[:400])
-        except Exception as e:  # noqa: BLE001
-            print("Script attempt failed:", repr(e))
-        time.sleep(10 * (attempt + 1))
-    sys.exit("Could not get a valid script from Gemini. Check the key or model name.")
+    headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
+    tried = []
+    models = [MODEL]
+    discovered = False
+    while models:
+        model = models.pop(0)
+        if model in tried:
+            continue
+        tried.append(model)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        model_unavailable = False
+        for attempt in range(3):
+            try:
+                r = requests.post(url, headers=headers, json=body, timeout=300)
+                if r.status_code == 200:
+                    parts = r.json()["candidates"][0]["content"]["parts"]
+                    text = "".join(p.get("text", "") for p in parts)
+                    data = json.loads(text)
+                    assert data["scenes"] and all(
+                        {"chapter", "narration", "image_prompt"} <= set(sc) for sc in data["scenes"]
+                    )
+                    print(f"Script written with model {model}", flush=True)
+                    return data
+                print("Gemini error", model, r.status_code, r.text[:300], flush=True)
+                if r.status_code in (400, 404):  # model not available -> try another one
+                    model_unavailable = True
+                    break
+            except Exception as e:  # noqa: BLE001
+                print("Script attempt failed:", repr(e), flush=True)
+            time.sleep(10 * (attempt + 1))
+        if model_unavailable and not discovered:
+            discovered = True
+            models += discover_models(key)
+            print("Will also try:", models, flush=True)
+    sys.exit("Could not get a valid script from Gemini. Tried models: " + ", ".join(tried))
+
+
+def discover_models(key: str) -> list:
+    """Ask Google which text models this key can use, newest 'flash' first."""
+    try:
+        r = requests.get(
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+            headers={"x-goog-api-key": key}, timeout=60,
+        )
+        names = []
+        for m in r.json().get("models", []):
+            name = m.get("name", "").replace("models/", "")
+            if (
+                "generateContent" in m.get("supportedGenerationMethods", [])
+                and "flash" in name
+                and not any(bad in name for bad in ("lite", "image", "tts", "live", "audio", "thinking", "robotics", "embed"))
+            ):
+                names.append(name)
+
+        def version(n: str):
+            import re
+            nums = re.findall(r"\d+(?:\.\d+)?", n)
+            return float(nums[0]) if nums else 0.0
+
+        return sorted(names, key=version, reverse=True)[:5]
+    except Exception as e:  # noqa: BLE001
+        print("Could not list models:", repr(e), flush=True)
+        return []
 
 
 # ---------------------------------------------------------------- images ----
