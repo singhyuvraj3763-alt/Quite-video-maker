@@ -1,10 +1,10 @@
 """
 Professional Hindi Documentary Automation Pipeline
-- Fast single-pass script generation (no 20-minute chapter hang)
-- Dynamic milestone callout badges (with Devanagari font support)
-- Synchronized yellow 1-2 line captions
+- Full automated single-pass script generation
+- Milestone Callout Badges with Devanagari font support
+- Paced image requests with multi-endpoint fallback
+- Fast, readable 1-2 line synchronized Hindi subtitles
 - Energetic SwaraNeural voiceover (+10% rate)
-- Guaranteed unique images per scene with Ken Burns motion
 - Bottom logo crop filter to eliminate watermarks
 """
 
@@ -166,31 +166,31 @@ def fit_cover(img: Image.Image) -> Image.Image:
 
 def fetch_image(prompt: str, path: Path, seed: int) -> bool:
     key = os.environ.get("POLLINATIONS_API_KEY", "").strip()
-    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
 
-    words = [w for w in re.findall(r"\b\w+\b", prompt) if len(w) > 2][:12]
-    core_subject = " ".join(words)
-    style = "cinematic documentary photography, archival 35mm historical realism, dramatic soft lighting, sharp focus, 16:9"
-    full_prompt = f"{core_subject}, {style}"
-    clean_p = quote(full_prompt, safe="")
+    words = [w for w in re.findall(r"\b\w+\b", prompt) if len(w) > 2][:10]
+    subject = " ".join(words)
+    clean_p = quote(f"{subject}, historical documentary, cinematic lighting, realistic, 16:9", safe="")
 
-    attempts = [
-        f"https://image.pollinations.ai/prompt/{clean_p}?seed={seed}&nologo=true",
-        f"https://image.pollinations.ai/prompt/{clean_p}?seed={seed}&nologo=true&model=turbo",
-        f"https://image.pollinations.ai/prompt/{quote(core_subject)}?seed={seed + 99}&nologo=true",
-        f"https://gen.pollinations.ai/image/{clean_p}?seed={seed}&nologo=true",
+    urls = [
+        f"https://image.pollinations.ai/prompt/{clean_p}?width=1280&height=720&seed={seed}&nologo=true",
+        f"https://image.pollinations.ai/prompt/{quote(subject)}?width=1280&height=720&seed={seed+5}&nologo=true",
+        f"https://image.pollinations.ai/prompt/{clean_p}?width=1024&height=576&seed={seed+10}&nologo=true&model=turbo"
     ]
 
-    for ep in attempts:
-        try:
-            r = requests.get(ep, headers=headers, timeout=22)
-            if r.status_code == 200 and len(r.content) > 6000:
-                img = Image.open(io.BytesIO(r.content)).convert("RGB")
-                fit_cover(img).save(path, quality=92)
-                return True
-        except Exception:
-            time.sleep(1.5)
-            continue
+    for url in urls:
+        for attempt in range(2):
+            try:
+                r = requests.get(url, headers=headers, timeout=18)
+                if r.status_code == 200 and len(r.content) > 5000:
+                    img = Image.open(io.BytesIO(r.content)).convert("RGB")
+                    fit_cover(img).save(path, quality=90)
+                    return True
+            except Exception:
+                time.sleep(2)
+                continue
 
     return False
 
@@ -201,19 +201,19 @@ def generate_images(scenes: list) -> list:
         img = WORK / f"img_{i:03d}.jpg"
         if not (img.exists() and img.stat().st_size > 5000):
             log(f"Generating Image {i + 1}/{n}: {sc['image_prompt'][:45]}...")
-            ok = fetch_image(sc["image_prompt"], img, seed=4200 + (i * 29))
+            ok = fetch_image(sc["image_prompt"], img, seed=5000 + (i * 37))
             if not ok:
-                log(f"::warning:: Image {i + 1} timed out from provider. Generating contextual slate.")
+                log(f"::warning:: Image {i + 1} timed out from provider. Generating solid dark slate.")
                 cmd = [
                     "ffmpeg", "-y", "-f", "lavfi",
                     "-i", f"color=c=#101820:s={W}x{H}:d=1",
-                    "-vf", f"drawtext=text='Scene {i+1}':fontcolor=white@0.6:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2",
                     "-frames:v", "1", str(img)
                 ]
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            time.sleep(3.0)
 
         paths.append(img)
-        time.sleep(0.3)
     return paths
 
 # ==================== Voiceover Engine ====================
@@ -411,4 +411,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-            
+    
