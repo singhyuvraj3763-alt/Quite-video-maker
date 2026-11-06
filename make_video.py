@@ -1,10 +1,9 @@
 """
 Professional Hindi Documentary Automation Pipeline
-- 100% Dynamic Model Discovery (Queries Google AI Studio directly; prioritizes Lite/8B/Flash)
-- Zero hardcoded model lists to eliminate HTTP 404s completely
-- Single-pass structured script generation (eliminates timeouts)
-- Paced image generation with multi-endpoint fallback (eliminates IP bans)
-- Milestone Callout Badges with Devanagari font support
+- Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
+- Fast single-pass structured script generation
+- Milestone Callout Badges with Devanagari font support & safe FFmpeg escaping
+- Paced image requests with multi-endpoint fallback
 - Fast, readable 1-2 line synchronized Hindi subtitles
 - Energetic SwaraNeural voiceover (+10% rate)
 - Bottom logo crop filter to eliminate watermarks
@@ -42,7 +41,7 @@ def fatal(msg: str) -> None:
 def log(msg: str) -> None:
     print(msg, flush=True)
 
-# ==================== Dynamic Gemini Engine ====================
+# ==================== Dynamic Gemini Script Engine ====================
 _good_model = None
 
 def gemini_key() -> str:
@@ -51,11 +50,11 @@ def gemini_key() -> str:
         fatal("GEMINI_API_KEY is missing in repo secrets.")
     return key
 
-def discover_all_active_models(key: str) -> list:
-    """Discovers every model currently enabled on your key, prioritizing lite and flash."""
-    url = f"{GEMINI_BASE}/models?pageSize=150"
+def get_live_models(key: str) -> list:
+    """Queries Google AI Studio to retrieve every model currently active on this key."""
+    url = f"{GEMINI_BASE}/models?pageSize=100"
     try:
-        r = requests.get(url, headers={"x-goog-api-key": key}, timeout=30)
+        r = requests.get(url, headers={"x-goog-api-key": key}, timeout=25)
         if r.status_code == 200:
             usable = []
             for m in r.json().get("models", []):
@@ -63,10 +62,9 @@ def discover_all_active_models(key: str) -> list:
                 methods = m.get("supportedGenerationMethods", [])
                 if "generateContent" in methods and not any(b in name for b in BAD_WORDS):
                     usable.append(name)
-
+            
             if usable:
-                # Rank priority: Lite/8B first (highest quota, fastest), then Flash, then others
-                def rank_model(n: str) -> int:
+                def sort_priority(n: str) -> int:
                     nl = n.lower()
                     if "lite" in nl or "8b" in nl:
                         return 0
@@ -74,15 +72,13 @@ def discover_all_active_models(key: str) -> list:
                         return 1
                     return 2
 
-                usable.sort(key=rank_model)
-                log(f"Auto-discovered {len(usable)} active models on your key: {', '.join(usable[:6])}")
+                usable.sort(key=sort_priority)
+                log(f"Discovered {len(usable)} active models on key. Priority: {', '.join(usable[:6])}")
                 return usable
-        else:
-            log(f"Failed to query model list (HTTP {r.status_code}): {r.text[:120]}")
     except Exception as e:
-        log(f"Model auto-discovery connection failed: {e!r}")
+        log(f"Live model discovery note: {e!r}")
     
-    fatal("Unable to retrieve available models from Google AI Studio. Check your GEMINI_API_KEY.")
+    return ["gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
 
 def extract_json(text: str):
     t = text.strip()
@@ -110,10 +106,9 @@ def gemini_json(prompt: str, label: str):
     }
 
     env_model = os.environ.get("GEMINI_MODEL", "").strip()
-    discovered = discover_all_active_models(key)
-
-    # Front-load user env model or previously verified working model
-    candidates = ([env_model] if env_model else []) + ([_good_model] if _good_model else []) + discovered
+    live_models = get_live_models(key)
+    
+    candidates = ([env_model] if env_model else []) + ([_good_model] if _good_model else []) + live_models
     models = [m for i, m in enumerate(candidates) if m and m not in candidates[:i]]
 
     for attempt in range(1, 5):
@@ -121,31 +116,35 @@ def gemini_json(prompt: str, label: str):
             url = f"{GEMINI_BASE}/models/{model}:generateContent"
             try:
                 log(f"[{label}] Querying model: {model} (Attempt {attempt})...")
-                r = requests.post(url, headers=headers, json=body, timeout=45)
-
+                r = requests.post(url, headers=headers, json=body, timeout=50)
+                
                 if r.status_code == 200:
-                    parts = r.json()["candidates"][0]["content"]["parts"]
-                    text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
-                    data = extract_json(text)
-                    if isinstance(data, dict) and data.get("scenes"):
-                        _good_model = model
-                        return data
+                    resp_json = r.json()
+                    candidates_list = resp_json.get("candidates", [])
+                    if candidates_list:
+                        parts = candidates_list[0].get("content", {}).get("parts", [])
+                        text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+                        if text:
+                            data = extract_json(text)
+                            if isinstance(data, dict) and data.get("scenes"):
+                                _good_model = model
+                                return data
 
                 if r.status_code in (429, 503):
-                    log(f"[{label}] {model} throttled/busy ({r.status_code}). Switching to next model...")
-                    time.sleep(5)
+                    log(f"[{label}] {model} throttled ({r.status_code}). Switching to next model...")
+                    time.sleep(4)
                 elif r.status_code == 404:
                     continue
                 else:
                     log(f"[{label}] {model} returned HTTP {r.status_code}.")
 
             except Exception as e:
-                log(f"[{label}] {model} error: {e!r}")
+                log(f"[{label}] {model} connection error: {e!r}")
                 continue
 
         time.sleep(8 * attempt)
 
-    fatal(f"All discovered models failed or timed out for '{label}'.")
+    sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
 # ==================== Script Processing ====================
 def clean_text(t: str) -> str:
@@ -153,7 +152,7 @@ def clean_text(t: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 def make_script(topic: str, n_scenes: int) -> dict:
-    log(f"Generating documentary script for: '{topic}' ({n_scenes} scenes)")
+    log(f"Generating full script in one go for topic: {topic} ({n_scenes} scenes)")
     prompt = (
         f"You are writing a premium, fast-paced YouTube documentary script in Hindi.\n"
         f"Topic: {topic}\n"
@@ -182,7 +181,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
             "callout": clean_text(s.get("callout", ""))
         })
 
-    log(f"Script ready: {len(scenes)} scenes assembled.")
+    log(f"Script generated successfully: {len(scenes)} scenes ready.")
     return {
         "topic": topic,
         "title": clean_text(data.get("title", topic)),
@@ -206,13 +205,15 @@ def fit_cover(img: Image.Image) -> Image.Image:
 
 def fetch_image(prompt: str, path: Path, seed: int) -> bool:
     key = os.environ.get("POLLINATIONS_API_KEY", "").strip()
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
     if key:
         headers["Authorization"] = f"Bearer {key}"
 
     words = [w for w in re.findall(r"\b\w+\b", prompt) if len(w) > 2][:10]
     subject = " ".join(words)
-    clean_p = quote(f"{subject}, historical documentary, cinematic lighting, realistic, 16:9", safe="")
+    clean_p = quote(f"{subject}, historical documentary, cinematic lighting, 16:9")
 
     urls = [
         f"https://image.pollinations.ai/prompt/{clean_p}?width=1280&height=720&seed={seed}&nologo=true",
@@ -229,7 +230,7 @@ def fetch_image(prompt: str, path: Path, seed: int) -> bool:
                     fit_cover(img).save(path, quality=90)
                     return True
             except Exception:
-                time.sleep(2)
+                time.sleep(1.5)
                 continue
 
     return False
@@ -251,8 +252,7 @@ def generate_images(scenes: list) -> list:
                 ]
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # Pacing delay to avoid runner IP rate limits
-            time.sleep(3.0)
+            time.sleep(2.5)
 
         paths.append(img)
     return paths
@@ -290,5 +290,174 @@ def format_srt_time(sec: float) -> str:
     millis = int((sec % 1) * 1000)
     s = int(sec)
     m, s = divmod(s, 60)
-    h, m = divmod(m,
-    
+    h, m = divmod(m, 60)
+    return f"{h:02d}:{m:02d}:{s:02d},{millis:03d}"
+
+def create_subtitles(scenes: list, durs: list, srt_path: Path):
+    cur_time = 0.0
+    lines = []
+    sub_idx = 1
+
+    for sc, dur in zip(scenes, durs):
+        scene_start = cur_time
+        scene_end = cur_time + dur
+        cur_time = scene_end
+
+        words = sc["narration"].split()
+        chunk_size = 7
+        chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
+        if not chunks:
+            continue
+
+        chunk_dur = dur / len(chunks)
+        for i, chk in enumerate(chunks):
+            c_start = scene_start + (i * chunk_dur)
+            c_end = c_start + chunk_dur
+            text = " ".join(chk)
+            lines.append(f"{sub_idx}\n{format_srt_time(c_start)} --> {format_srt_time(c_end)}\n{text}\n")
+            sub_idx += 1
+
+    srt_path.write_text("\n".join(lines), encoding="utf-8")
+
+# ==================== Motion & Callout Video Compositing ====================
+def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> str:
+    f = frames
+    cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+    styles = [
+        (f"1+0.12*on/{f}", cx, cy),
+        (f"1.12-0.12*on/{f}", cx, cy),
+        ("1.08", f"(iw-iw/zoom)*on/{f}", cy),
+        ("1.08", f"(iw-iw/zoom)*(1-on/{f})", cy),
+    ]
+    z, x, y = styles[i % 4]
+
+    vf = (
+        f"crop=iw:ih-45:0:0,"
+        f"scale=3840:2160:flags=lanczos,"
+        f"zoompan=z='{z}':x='{x}':y='{y}':d={f}:s={W}x{H}:fps={FPS},format=yuv420p"
+    )
+
+    if callout and len(callout.strip()) > 1:
+        # Strictly escape FFmpeg filter characters: \ ' : %
+        clean_callout = (
+            callout.replace("\\", "")
+            .replace("'", "")
+            .replace(":", " - ")
+            .replace("%", "")
+            .replace('"', "")
+            .strip()
+        )
+        badge_duration = min(4.5, dur - 0.5) if dur > 2 else dur
+        box_w = max(240, min(800, len(clean_callout) * 16 + 50))
+        vf += (
+            f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.75:t=fill:enable='between(t,0.5,{badge_duration})'"
+            f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.5,{badge_duration})'"
+            f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=22:x=102:y=98:"
+            f"font='Noto Sans Devanagari':enable='between(t,0.5,{badge_duration})'"
+        )
+
+    return vf
+
+def render_clip(img: Path, aud: Path, clip: Path, i: int, dur: float, callout: str) -> None:
+    tmp = clip.with_name(clip.stem + ".tmp.mp4")
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error", "-i", str(img), "-i", str(aud),
+        "-vf", motion_and_callout_filter(i, int(dur * FPS), callout, dur), "-af", "apad",
+        "-t", f"{dur:.3f}", "-r", str(FPS),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k", str(tmp)
+    ]
+    subprocess.run(cmd, check=True)
+    os.replace(tmp, clip)
+
+def build_video(data: dict) -> None:
+    WORK.mkdir(exist_ok=True)
+    OUT.mkdir(exist_ok=True)
+    scenes = data["scenes"]
+    n = len(scenes)
+
+    log("=== Step 1/3: Generating Distinct Scene Visuals ===")
+    imgs = generate_images(scenes)
+
+    log("=== Step 2/3: Recording Hindi Narration ===")
+    auds, durs = [], []
+    for i, sc in enumerate(scenes):
+        aud = WORK / f"aud_{i:03d}.mp3"
+        if not (aud.exists() and aud.stat().st_size > 1000 and audio_duration(aud) > 0.8):
+            log(f"Recording Scene {i + 1}/{n}...")
+            speak(sc["narration"], aud)
+        auds.append(aud)
+        durs.append(audio_duration(aud) + 0.3)
+
+    log("=== Step 3/3: Rendering Motion, Callout Badges & Subtitles ===")
+    clips = []
+    for i in range(n):
+        clip = WORK / f"clip_{i:03d}.mp4"
+        callout_text = scenes[i].get("callout", "")
+        if not (clip.exists() and clip.stat().st_size > 1000):
+            badge_log = f" [Badge: '{callout_text}']" if callout_text else ""
+            log(f"Encoding Scene {i + 1}/{n}{badge_log}...")
+            render_clip(imgs[i], auds[i], clip, i, durs[i], callout_text)
+        clips.append(clip)
+
+    listfile = WORK / "list.txt"
+    listfile.write_text("".join(f"file '{c.resolve()}'\n" for c in clips))
+
+    raw_concat = WORK / "concat_raw.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+         "-i", str(listfile), "-c", "copy", str(raw_concat)],
+        check=True
+    )
+
+    srt_path = WORK / "subtitles.srt"
+    create_subtitles(scenes, durs, srt_path)
+
+    final = OUT / "final.mp4"
+    subtitle_filter = (
+        f"subtitles='{srt_path.resolve()}':force_style="
+        "'FontName=Noto Sans Devanagari,FontSize=22,PrimaryColour=&H0000FFFF,"
+        "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=55,Alignment=2'"
+    )
+
+    log("Burning in clean dynamic subtitles...")
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw_concat),
+         "-vf", subtitle_filter, "-c:v", "libx264", "-crf", "22", "-preset", "veryfast",
+         "-c:a", "copy", "-movflags", "+faststart", str(final)],
+        check=True
+    )
+
+    log(f"COMPLETED! Final video saved to {final}")
+
+# ==================== Main Runner ====================
+def main() -> None:
+    mode = sys.argv[1] if len(sys.argv) > 1 else "full"
+    topic = os.environ.get("TOPIC", "The history of Marwar").strip()
+    n = int(os.environ.get("SCENES", "24") or 24)
+
+    if mode == "full" and os.environ.get("RESUME") != "1":
+        for p in [WORK, OUT]:
+            if p.exists():
+                import shutil
+                shutil.rmtree(p)
+        WORK.mkdir(exist_ok=True)
+        OUT.mkdir(exist_ok=True)
+
+    if mode in ("full", "script"):
+        data = make_script(topic, n)
+        Path("script.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        if mode == "script":
+            log("Script saved.")
+            return
+    else:
+        p = Path("script.json")
+        if not p.exists():
+            fatal("script.json not found.")
+        data = json.loads(p.read_text(encoding="utf-8"))
+
+    build_video(data)
+
+if __name__ == "__main__":
+    main()
+                        
