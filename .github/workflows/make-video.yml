@@ -14,7 +14,7 @@ on:
       topic:
         description: 'Video Topic'
         required: true
-        default: 'The history of Marwar'
+        default: ''
       scenes:
         description: 'Number of Scenes'
         required: true
@@ -43,7 +43,11 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install requests pillow edge-tts gTTS
-
+      - name: Clean Old Assets & Cache
+        run: |
+          rm -rf work/ out/
+          mkdir -p work out
+          
       - name: Verify Script Syntax
         run: |
           python -m py_compile make_video.py
