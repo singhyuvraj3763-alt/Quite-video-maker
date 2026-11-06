@@ -1,10 +1,10 @@
 """
 Professional Hindi Documentary Automation Pipeline
-- Guaranteed unique, distinct visual for every single scene
-- Resilient image retrieval with multi-model fallback (Flux -> Turbo -> Direct)
-- Documentary Milestone Callout Badges (Year / Location / Milestone pills)
-- Fast, readable 1-2 line synchronized Hindi subtitles
+- Fast single-pass script generation (no 20-minute chapter hang)
+- Dynamic milestone callout badges (with Devanagari font support)
+- Synchronized yellow 1-2 line captions
 - Energetic SwaraNeural voiceover (+10% rate)
+- Guaranteed unique images per scene with Ken Burns motion
 - Bottom logo crop filter to eliminate watermarks
 """
 
@@ -25,10 +25,11 @@ FPS = 25
 W, H = 1920, 1080
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 DEFAULT_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
     "gemini-3.5-flash",
-    "gemini-3.6-flash",
-    "gemini-3.0-flash",
-    "gemini-3.7-flash"
+    "gemini-3.0-flash"
 ]
 
 VOICE = os.environ.get("VOICE", "hi-IN-SwaraNeural")
@@ -48,37 +49,12 @@ def log(msg: str) -> None:
 
 # ==================== Gemini Script Engine ====================
 _good_model = None
-_discovered = []
 
 def gemini_key() -> str:
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
-        fatal("GEMINI_API_KEY is missing.")
+        fatal("GEMINI_API_KEY is missing in repo secrets.")
     return key
-
-def list_models(key: str) -> list:
-    try:
-        url = f"{GEMINI_BASE}/models?pageSize=200"
-        r = requests.get(url, headers={"x-goog-api-key": key}, timeout=60)
-        names = []
-        for m in r.json().get("models", []):
-            name = m.get("name", "").replace("models/", "")
-            if "generateContent" not in m.get("supportedGenerationMethods", []):
-                continue
-            if "flash" not in name or any(b in name for b in BAD_WORDS):
-                continue
-            names.append(name)
-
-        def version(n: str) -> float:
-            nums = re.findall(r"\d+(?:\.\d+)?", n)
-            return float(nums[0]) if nums else 0.0
-
-        normal = sorted([n for n in names if "lite" not in n], key=version, reverse=True)
-        lite = sorted([n for n in names if "lite" in n], key=version, reverse=True)
-        return (normal + lite)[:6]
-    except Exception as e:
-        log(f"Could not list models: {e!r}")
-        return []
 
 def extract_json(text: str):
     t = text.strip()
@@ -92,130 +68,85 @@ def extract_json(text: str):
             return json.loads(t[a : b + 1])
         raise
 
-def gemini_json(prompt: str, validate, label: str, max_tokens: int = 16000, temperature: float = 0.8):
-    global _good_model, _discovered
+def gemini_json(prompt: str, label: str):
+    global _good_model
     key = gemini_key()
     headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "responseMimeType": "application/json",
-            "temperature": temperature,
-            "maxOutputTokens": max_tokens,
+            "temperature": 0.7,
+            "maxOutputTokens": 8192,
         },
     }
-    env_model = os.environ.get("GEMINI_MODEL", "").strip()
-    for round_no in range(1, 5):
-        candidates = [_good_model, env_model] + DEFAULT_MODELS + _discovered
-        models, seen = [], set()
-        for m in candidates:
-            if m and m not in seen:
-                seen.add(m)
-                models.append(m)
 
+    env_model = os.environ.get("GEMINI_MODEL", "").strip()
+    candidates = [_good_model, env_model] + DEFAULT_MODELS
+    models = [m for i, m in enumerate(candidates) if m and m not in candidates[:i]]
+
+    for attempt in range(1, 4):
         for model in models:
             url = f"{GEMINI_BASE}/models/{model}:generateContent"
-            for attempt in range(1, 4):
-                try:
-                    r = requests.post(url, headers=headers, json=body, timeout=180)
-                except Exception as e:
-                    log(f"[{label}] retry with {model}: {e!r}")
-                    time.sleep(5 * attempt)
-                    continue
-
+            try:
+                log(f"[{label}] Requesting script from {model}...")
+                r = requests.post(url, headers=headers, json=body, timeout=45)
                 if r.status_code == 200:
-                    try:
-                        parts = r.json()["candidates"][0]["content"]["parts"]
-                        text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
-                        data = extract_json(text)
-                        problem = validate(data)
-                        if problem is None:
-                            _good_model = model
-                            return data
-                    except Exception:
-                        time.sleep(3)
-                        continue
+                    parts = r.json()["candidates"][0]["content"]["parts"]
+                    text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+                    data = extract_json(text)
+                    if isinstance(data, dict) and data.get("scenes"):
+                        _good_model = model
+                        return data
+                log(f"[{label}] {model} returned HTTP {r.status_code}, trying next model...")
+            except Exception as e:
+                log(f"[{label}] {model} timeout/error: {e!r}")
+                continue
 
-                if r.status_code in (400, 403, 404):
-                    break
-                time.sleep(min(5 * (2 ** (attempt - 1)), 30))
+        time.sleep(5 * attempt)
 
-        if round_no == 1 or not _discovered:
-            found = list_models(key)
-            _discovered = [m for m in found if m not in DEFAULT_MODELS]
-
-        time.sleep(15)
-
-    sys.exit(f"Gemini script generation timed out for: '{label}'.")
+    sys.exit(f"Gemini script generation timed out across all models for '{label}'.")
 
 # ==================== Script Processing ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
 
-def check_outline(d) -> str:
-    ch = d.get("chapters") if isinstance(d, dict) else None
-    if not isinstance(ch, list) or not (3 <= len(ch) <= 10):
-        return "need 3 to 10 chapters"
-    if not all(isinstance(c, dict) and c.get("title") and c.get("summary") for c in ch):
-        return "chapter missing title or summary"
-    return None
-
-def make_check_scenes(m: int):
-    def check(d) -> str:
-        sc = d.get("scenes") if isinstance(d, dict) else None
-        if not isinstance(sc, list) or len(sc) < m:
-            return f"need {m} scenes"
-        for s in sc[:m]:
-            if not isinstance(s, dict) or not s.get("narration") or not s.get("image_prompt"):
-                return "scene missing narration or prompt"
-        return None
-    return check
-
 def make_script(topic: str, n_scenes: int) -> dict:
-    k = max(4, min(8, round(n_scenes / 3.5)))
-    log(f"Planning outline for: {topic}")
-    outline = gemini_json(
-        f"You are writing a premium YouTube documentary in Hindi.\nTopic: {topic}\n"
-        f"Divide into {k} chapters in chronological storytelling order.\n"
-        'Return JSON: {"title": "Hindi Title", "description": "Hindi summary", '
-        '"chapters": [{"title": "short English title", "summary": "brief summary"}]}',
-        check_outline,
-        label="outline",
+    log(f"Generating full script in one go for topic: {topic} ({n_scenes} scenes)")
+    prompt = (
+        f"You are writing a premium, fast-paced YouTube documentary script in Hindi.\n"
+        f"Topic: {topic}\n"
+        f"Create exactly {n_scenes} scenes in chronological order covering the complete story.\n"
+        "Rules:\n"
+        "- title: engaging Hindi documentary title.\n"
+        "- description: 2-3 sentence Hindi summary.\n"
+        "- narration: natural spoken Hindi in Devanagari script, exactly 25-35 words per scene.\n"
+        "- image_prompt: detailed visual description in English of the exact moment/location/artifacts. No text or logos.\n"
+        "- callout: 2-4 word milestone badge in English/Hindi for dates, rulers, battles, or places (e.g. '1459 • Mehrangarh Fort', '1544 • Battle of Sammel', 'Rao Maldeo'). Keep empty \"\" if no milestone.\n"
+        "Return pure JSON:\n"
+        '{\n'
+        '  "title": "Hindi Title",\n'
+        '  "description": "Hindi summary",\n'
+        '  "scenes": [\n'
+        '    {"narration": "...", "image_prompt": "...", "callout": "..."}\n'
+        '  ]\n'
+        '}'
     )
-    chapters = outline["chapters"]
-    k = len(chapters)
-    counts = [n_scenes // k + (1 if i < (n_scenes % k) else 0) for i in range(k)]
-    outline_text = "\n".join(f"{i + 1}. {c['title']}: {c['summary']}" for i, c in enumerate(chapters))
-    scenes, prev = [], ""
+    data = gemini_json(prompt, label="full_script")
+    scenes = []
+    for s in data.get("scenes", [])[:n_scenes]:
+        scenes.append({
+            "narration": clean_text(s.get("narration", "")),
+            "image_prompt": clean_text(s.get("image_prompt", "")),
+            "callout": clean_text(s.get("callout", ""))
+        })
 
-    for i, (ch, m) in enumerate(zip(chapters, counts)):
-        log(f"Writing chapter {i + 1}/{k}: {ch['title']} ({m} scenes)")
-        prompt = (
-            f"Topic: {topic}\nOutline:\n{outline_text}\n"
-            + (f"Previous scene:\n{prev}\n" if prev else "")
-            + f"Write chapter {i + 1}/{k}: {ch['title']} ({m} scenes).\n"
-            "Rules:\n"
-            "- narration: spoken Hindi in Devanagari, engaging tone, exactly 25-35 words per scene.\n"
-            "- image_prompt: A direct, highly specific scene visual in English matching this exact scene's events (e.g. vintage weapons, desert forts, royal courts, ancient maps, battlefields, specific artifacts). NEVER repeat previous descriptions.\n"
-            "- callout: An informative 2-4 word milestone badge in English/Hindi for on-screen documentary graphics whenever a year, date, person, or location appears (e.g., '1459 • Mehrangarh Fort', '1544 • Battle of Sammel', 'Rao Maldeo Era'). If no milestone, keep it an empty string \"\".\n"
-            'Return JSON only: {"scenes": [{"narration": "", "image_prompt": "", "callout": ""}]}'
-        )
-        data = gemini_json(prompt, make_check_scenes(m), label=f"chapter {i + 1}/{k}")
-        for s in data["scenes"][:m]:
-            scenes.append({
-                "chapter": ch["title"],
-                "narration": clean_text(s["narration"]),
-                "image_prompt": clean_text(s["image_prompt"]),
-                "callout": clean_text(s.get("callout", "")),
-            })
-        prev = scenes[-1]["narration"]
-        time.sleep(1)
-
+    log(f"Script generated successfully: {len(scenes)} scenes ready.")
     return {
         "topic": topic,
-        "title": clean_text(outline["title"]),
-        "description": clean_text(outline.get("description", "")),
+        "title": clean_text(data.get("title", topic)),
+        "description": clean_text(data.get("description", "")),
         "scenes": scenes,
     }
 
@@ -237,14 +168,12 @@ def fetch_image(prompt: str, path: Path, seed: int) -> bool:
     key = os.environ.get("POLLINATIONS_API_KEY", "").strip()
     headers = {"Authorization": f"Bearer {key}"} if key else {}
 
-    # Simplify prompt keywords to avoid URL length & gateway rejection
     words = [w for w in re.findall(r"\b\w+\b", prompt) if len(w) > 2][:12]
     core_subject = " ".join(words)
     style = "cinematic documentary photography, archival 35mm historical realism, dramatic soft lighting, sharp focus, 16:9"
     full_prompt = f"{core_subject}, {style}"
     clean_p = quote(full_prompt, safe="")
 
-    # Tiered generation endpoints with distinct seeds and models
     attempts = [
         f"https://image.pollinations.ai/prompt/{clean_p}?seed={seed}&nologo=true",
         f"https://image.pollinations.ai/prompt/{clean_p}?seed={seed}&nologo=true&model=turbo",
@@ -272,18 +201,13 @@ def generate_images(scenes: list) -> list:
         img = WORK / f"img_{i:03d}.jpg"
         if not (img.exists() and img.stat().st_size > 5000):
             log(f"Generating Image {i + 1}/{n}: {sc['image_prompt'][:45]}...")
-            
-            # Seed changes per index and attempts varied prompts
             ok = fetch_image(sc["image_prompt"], img, seed=4200 + (i * 29))
-            
-            # If all attempts fail, generate a contextual topic slate (NEVER duplicate previous image)
             if not ok:
                 log(f"::warning:: Image {i + 1} timed out from provider. Generating contextual slate.")
-                chap_name = sc.get("chapter", "Documentary").replace("'", "")
                 cmd = [
                     "ffmpeg", "-y", "-f", "lavfi",
                     "-i", f"color=c=#101820:s={W}x{H}:d=1",
-                    "-vf", f"drawtext=text='{chap_name}':fontcolor=white@0.6:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2",
+                    "-vf", f"drawtext=text='Scene {i+1}':fontcolor=white@0.6:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2",
                     "-frames:v", "1", str(img)
                 ]
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -365,20 +289,17 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
         ("1.08", f"(iw-iw/zoom)*(1-on/{f})", cy),
     ]
     z, x, y = styles[i % 4]
-    
-    # Base Motion: Crop bottom 45px to remove watermarks, scale, zoompan
+
     vf = (
         f"crop=iw:ih-45:0:0,"
         f"scale=3840:2160:flags=lanczos,"
         f"zoompan=z='{z}':x='{x}':y='{y}':d={f}:s={W}x{H}:fps={FPS},format=yuv420p"
     )
 
-    # Milestone Callout Pill (Safely calculated box width in Python)
     if callout and len(callout.strip()) > 1:
         clean_callout = callout.replace("'", "").replace(":", "-").replace('"', "").strip()
         badge_duration = min(4.5, dur - 0.5) if dur > 2 else dur
         box_w = max(240, min(800, len(clean_callout) * 16 + 50))
-        
         vf += (
             f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.75:t=fill:enable='between(t,0.5,{badge_duration})'"
             f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.5,{badge_duration})'"
@@ -463,10 +384,9 @@ def build_video(data: dict) -> None:
 # ==================== Main Runner ====================
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "full"
-    topic = os.environ.get("TOPIC", "The Mahindra story in Hindi").strip()
+    topic = os.environ.get("TOPIC", "The history of Marwar").strip()
     n = int(os.environ.get("SCENES", "24") or 24)
 
-    # Clean previous cached images and clips when starting a fresh run
     if mode == "full" and os.environ.get("RESUME") != "1":
         for p in [WORK, OUT]:
             if p.exists():
@@ -491,4 +411,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-        
+            
