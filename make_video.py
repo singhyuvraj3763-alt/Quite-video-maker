@@ -2,14 +2,10 @@
 Professional Bilingual (Hindi & English) Documentary Automation Pipeline
 - Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
 - Seamless English & Hindi support via LANGUAGE environment variable ("hi" or "en")
-- Storytelling-driven narration prompt (conversational cadence, natural pauses)
+- Storytelling-driven narration prompt with chronological image progression
 - Voice tuning: SwaraNeural with +14% rate and +1Hz pitch to eliminate trailing syllable lag
 - High-res Wikimedia Commons archive search with deduplication
-- Quality-gated AI fallback (prevents distorted/melted figures)
 - Devanagari font auto-discovery to prevent tofu boxes in milestone badges
-- Fast single-pass structured script generation
-- Synchronized yellow captions (1-2 lines)
-- Ken Burns motion effects & milestone callout badges
 - Bottom logo crop filter to eliminate watermarks
 """
 
@@ -60,7 +56,6 @@ def log(msg: str) -> None:
 
 # ==================== Font Discovery ====================
 def get_font_path() -> tuple:
-    """Locates system fonts to prevent tofu boxes in FFmpeg badges."""
     devanagari_candidates = [
         "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
@@ -107,14 +102,11 @@ def get_live_models(key: str) -> list:
                     if "flash" in nl:
                         return 1
                     return 2
-
                 usable.sort(key=sort_priority)
-                log(f"Discovered {len(usable)} active models on key. Priority: {', '.join(usable[:6])}")
                 return usable
-    except Exception as e:
-        log(f"Live model discovery note: {e!r}")
-    
-    return ["gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
+    except Exception:
+        pass
+    return ["gemini-2.0-flash-lite", "gemini-1.5-flash"]
 
 def extract_json(text: str):
     t = text.strip()
@@ -143,7 +135,6 @@ def gemini_json(prompt: str, label: str):
 
     env_model = os.environ.get("GEMINI_MODEL", "").strip()
     live_models = get_live_models(key)
-    
     candidates = ([env_model] if env_model else []) + ([_good_model] if _good_model else []) + live_models
     models = [m for i, m in enumerate(candidates) if m and m not in candidates[:i]]
 
@@ -151,9 +142,7 @@ def gemini_json(prompt: str, label: str):
         for model in models:
             url = f"{GEMINI_BASE}/models/{model}:generateContent"
             try:
-                log(f"[{label}] Querying model: {model} (Attempt {attempt})...")
                 r = requests.post(url, headers=headers, json=body, timeout=50)
-                
                 if r.status_code == 200:
                     resp_json = r.json()
                     candidates_list = resp_json.get("candidates", [])
@@ -165,24 +154,17 @@ def gemini_json(prompt: str, label: str):
                             if isinstance(data, dict) and data.get("scenes"):
                                 _good_model = model
                                 return data
-
                 if r.status_code in (429, 503):
-                    log(f"[{label}] {model} throttled ({r.status_code}). Switching to next model...")
                     time.sleep(4)
                 elif r.status_code == 404:
                     continue
-                else:
-                    log(f"[{label}] {model} returned HTTP {r.status_code}.")
-
-            except Exception as e:
-                log(f"[{label}] {model} connection error: {e!r}")
+            except Exception:
                 continue
-
         time.sleep(8 * attempt)
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing ====================
+# ==================== Script Processing (With Unique Image Rules) ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
@@ -194,8 +176,8 @@ def make_script(topic: str, n_scenes: int) -> dict:
         lang_rules = (
             "- title: Engaging English documentary title.\n"
             "- description: 2-3 sentence English summary.\n"
-            "- narration: Dynamic, conversational documentary storytelling (28-34 words per scene). Speak directly to the audience with suspense, vivid descriptions, and curiosity hooks. AVOID dry textbook summaries.\n"
-            "- callout: 2-4 word milestone badge in English for dates, key figures, or landmarks (e.g., '1459 • Mehrangarh Fort', '1544 • Battle of Sammel'). Leave empty \"\" if no milestone.\n"
+            "- narration: Dynamic, conversational documentary storytelling (28-34 words per scene). Speak directly to the audience with suspense, vivid descriptions, and curiosity hooks.\n"
+            "- callout: 2-4 word milestone badge in English for dates, key figures, or landmarks (e.g., '1459 • Mehrangarh Fort'). Leave empty \"\" if no milestone.\n"
         )
     else:
         lang_rules = (
@@ -203,21 +185,23 @@ def make_script(topic: str, n_scenes: int) -> dict:
             "- description: 2-3 sentence Hindi summary.\n"
             "- narration: जीवंत, रोमांचक और सरल किस्सागोई (Storytelling) शैली में हिंदी नरेशन (25-32 शब्द प्रति दृश्य)। "
             "किताबों जैसी भारी-भरकम भाषा बिल्कुल न लिखें। ऐसे लिखें जैसे आप किसी को सामने बैठकर एक दास्तान सुना रहे हों। "
-            "जहाँ हल्का ठहराव चाहिए वहाँ अल्पविराम (,) का प्रयोग करें ताकि आवाज़ में खिंचाव या लैग न लगे। "
-            "उदाहरण: 'साल था 1459, जब तपते थार के सीने पर एक ऐसा किला खड़ा हुआ, जिसे देखकर दुश्मन भी थर्रा उठे।'\n"
-            "- callout: 2-4 word milestone badge in Hindi/English for dates, rulers, battles, or places (e.g. '1459 • मेहरानगढ़ दुर्ग', '1544 • सुमेल युद्ध'). Leave empty \"\" if no milestone.\n"
+            "जहाँ हल्का ठहराव चाहिए वहाँ अल्पविराम (,) का प्रयोग करें ताकि आवाज़ में लैग न लगे।\n"
+            "- callout: 2-4 word milestone badge in Hindi/English for dates, rulers, battles, or places (e.g. '1459 • मेहरानगढ़ दुर्ग'). Leave empty \"\" if no milestone.\n"
         )
 
     prompt = (
         f"You are a master historical storyteller creating a high-retention YouTube documentary.\n"
         f"Topic: {topic}\n"
         f"Language: {'English' if LANGUAGE == 'en' else 'Hindi'}\n"
-        f"Create exactly {n_scenes} scenes in chronological order covering the complete story.\n"
+        f"Create exactly {n_scenes} scenes in chronological order covering the complete story from start to finish.\n"
+        "CRITICAL RULE FOR IMAGES: Every single scene MUST have a 100% UNIQUE 'image_prompt'. "
+        "DO NOT repeat similar visual prompts across scenes. Progress chronologically: "
+        "Early scenes = ancient origins & foundation; Middle scenes = major battles, rulers, and fortifications; "
+        "Final scenes (Scene 18-24) = modern history, royal palaces, cenotaphs, Umaid Bhawan Palace, and cultural heritage.\n"
         "Guidelines:\n"
         "- Hook the listener immediately in Scene 1 with dramatic narrative tension.\n"
-        "- Use active voice, clear emotional pacing, and conversational momentum.\n"
         f"{lang_rules}"
-        "- image_prompt: 3-5 specific English keywords focused on majestic architectural views, historical artifacts, vintage maps, royal durbars, weapons/armor, or landscapes. AVOID complex action shots like riders mounted on galloping horses. Examples: 'Mehrangarh Fort Jodhpur exterior', 'Ancient Rajput sword and shield artifact', 'Mandore cenotaphs architecture'. No text or logos.\n"
+        "- image_prompt: 3-5 specific English keywords focused on majestic architectural views, historical artifacts, vintage maps, royal durbars, weapons/armor, or landscapes. Examples for later scenes: 'Umaid Bhawan Palace Jodhpur exterior architecture', 'Jaswant Thada marble cenotaph Jodhpur', 'Vintage royal carriage artifact Rajasthan'. No text or logos.\n"
         "Return pure JSON:\n"
         '{\n'
         '  "title": "Title",\n'
@@ -261,9 +245,8 @@ def fit_cover(img: Image.Image) -> Image.Image:
     return img.resize((W, H), Image.LANCZOS)
 
 def search_wikimedia(query: str) -> list:
-    """Searches Wikimedia Commons File namespace (gsrnamespace=6) for 1280px web-ready images."""
     api_url = "https://commons.wikimedia.org/w/api.php"
-    headers = {"User-Agent": "HistoricalDocBot/2.0 (contact: admin@marwarhist.org)"}
+    headers = {"User-Agent": "HistoricalDocBot/2.0"}
     params = {
         "action": "query",
         "generator": "search",
@@ -292,11 +275,9 @@ def search_wikimedia(query: str) -> list:
 
 def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
     global _used_image_urls
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
+    headers = {"User-Agent": "Mozilla/5.0"}
     prompt = scene_info.get("image_prompt", "")
     words = [w for w in re.findall(r"\b[A-Za-z]+\b", prompt) if len(w) > 2]
-    
     specific_query = " ".join(words[:4]) if words else "Rajasthan history"
     topic_clean = " ".join([w for w in re.findall(r"\b[A-Za-z]+\b", topic) if len(w) > 2][:3])
     
@@ -325,13 +306,8 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
                     continue
 
     core_kw = " ".join(words[:5]) if words else "historical architecture Rajasthan"
-    safe_prompt = quote(
-        f"{core_kw}, cinematic documentary still, national geographic style, architectural photography, 8k, sharp focus, masterpiece"
-    )
-    ai_url = (
-        f"https://image.pollinations.ai/prompt/{safe_prompt}"
-        f"?width=1280&height=720&seed={seed}&nologo=true&model=turbo"
-    )
+    safe_prompt = quote(f"{core_kw}, cinematic documentary still, national geographic style, 8k, sharp focus")
+    ai_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=1280&height=720&seed={seed}&nologo=true&model=turbo"
     try:
         r = requests.get(ai_url, headers=headers, timeout=14)
         if r.status_code == 200 and len(r.content) > 12000:
@@ -340,7 +316,6 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
             return True
     except Exception:
         pass
-
     return False
 def generate_images(scenes: list, topic: str) -> list:
     n = len(scenes)
@@ -351,23 +326,15 @@ def generate_images(scenes: list, topic: str) -> list:
             log(f"Fetching Distinct Visual {i + 1}/{n}: {sc['image_prompt'][:45]}...")
             ok = fetch_image(sc, img, seed=8000 + (i * 47), topic=topic)
             if not ok:
-                log(f"::warning:: Generating fallback slate for scene {i + 1}.")
-                cmd = [
-                    "ffmpeg", "-y", "-f", "lavfi",
-                    "-i", f"color=c=#141c26:s={W}x{H}:d=1",
-                    "-frames:v", "1", str(img)
-                ]
+                cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#141c26:s={W}x{H}:d=1", "-frames:v", "1", str(img)]
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
             time.sleep(1.5)
-
         paths.append(img)
     return paths
 
 # ==================== Voiceover Engine ====================
 async def _edge(text: str, path: Path) -> None:
     import edge_tts
-    # Applying rate and pitch eliminates trailing syllable lag and gives dynamic rhythm
     communicate = edge_tts.Communicate(text, VOICE, rate=VOICE_RATE, pitch=VOICE_PITCH)
     await communicate.save(str(path))
 
@@ -388,8 +355,7 @@ def speak(text: str, path: Path) -> None:
             asyncio.run(_edge(text, path))
             if path.exists() and path.stat().st_size > 1000 and audio_duration(path) > 0.8:
                 return
-        except Exception as e:
-            log(f"Edge-TTS attempt {attempt + 1} failed: {e!r}")
+        except Exception:
             time.sleep(2)
     from gtts import gTTS
     gTTS(text, lang=LANGUAGE).save(str(path))
@@ -406,18 +372,15 @@ def create_subtitles(scenes: list, durs: list, srt_path: Path):
     cur_time = 0.0
     lines = []
     sub_idx = 1
-
     for sc, dur in zip(scenes, durs):
         scene_start = cur_time
         scene_end = cur_time + dur
         cur_time = scene_end
-
         words = sc["narration"].split()
         chunk_size = 7
         chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
         if not chunks:
             continue
-
         chunk_dur = dur / len(chunks)
         for i, chk in enumerate(chunks):
             c_start = scene_start + (i * chunk_dur)
@@ -425,7 +388,6 @@ def create_subtitles(scenes: list, durs: list, srt_path: Path):
             text = " ".join(chk)
             lines.append(f"{sub_idx}\n{format_srt_time(c_start)} --> {format_srt_time(c_end)}\n{text}\n")
             sub_idx += 1
-
     srt_path.write_text("\n".join(lines), encoding="utf-8")
 
 # ==================== Motion & Callout Video Compositing ====================
@@ -440,7 +402,6 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     ]
     z, x, y = styles[i % 4]
 
-    # Watermark bottom 45px slice and Ken Burns motion
     vf = (
         f"crop=iw:ih-45:0:0,"
         f"scale=3840:2160:flags=lanczos,"
@@ -448,17 +409,9 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     )
 
     if callout and len(callout.strip()) > 1:
-        clean_callout = (
-            callout.replace("\\", "")
-            .replace("'", "")
-            .replace(":", " - ")
-            .replace("%", "")
-            .replace('"', "")
-            .strip()
-        )
+        clean_callout = callout.replace("\\", "").replace("'", "").replace(":", " - ").strip()
         badge_duration = min(4.5, dur - 0.5) if dur > 2 else dur
         box_w = max(240, min(800, len(clean_callout) * 16 + 50))
-        
         font_opt = f"fontfile='{FONT_FILE}'" if (FONT_FILE and LANGUAGE == "hi") else f"font='{FONT_NAME}'"
 
         vf += (
@@ -467,7 +420,6 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
             f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=22:x=102:y=98:"
             f"{font_opt}:enable='between(t,0.5,{badge_duration})'"
         )
-
     return vf
 
 def render_clip(img: Path, aud: Path, clip: Path, i: int, dur: float, callout: str) -> None:
@@ -508,8 +460,6 @@ def build_video(data: dict) -> None:
         clip = WORK / f"clip_{i:03d}.mp4"
         callout_text = scenes[i].get("callout", "")
         if not (clip.exists() and clip.stat().st_size > 1000):
-            badge_log = f" [Badge: '{callout_text}']" if callout_text else ""
-            log(f"Encoding Scene {i + 1}/{n}{badge_log}...")
             render_clip(imgs[i], auds[i], clip, i, durs[i], callout_text)
         clips.append(clip)
 
@@ -527,8 +477,6 @@ def build_video(data: dict) -> None:
     create_subtitles(scenes, durs, srt_path)
 
     final = OUT / "final.mp4"
-    
-    # Subtitle font configuration based on language
     sub_font = "Noto Sans Devanagari" if LANGUAGE == "hi" else "DejaVu Sans"
     subtitle_filter = (
         f"subtitles='{srt_path.resolve()}':force_style="
@@ -543,7 +491,6 @@ def build_video(data: dict) -> None:
          "-c:a", "copy", "-movflags", "+faststart", str(final)],
         check=True
     )
-
     log(f"COMPLETED! Final video saved to {final}")
 
 # ==================== Main Runner ====================
@@ -564,7 +511,6 @@ def main() -> None:
         data = make_script(topic, n)
         Path("script.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         if mode == "script":
-            log("Script saved.")
             return
     else:
         p = Path("script.json")
