@@ -1,24 +1,38 @@
 """
-Professional Cinematic Documentary Automation Pipeline (Precision Entity-Matched Visual Edition)
-- Precision Entity Search: Directly targets specific subjects like historical figures, landmarks, and corporate history.
-- Multi-Beat Dynamic Beats: Changes visual context smoothly across scenes.
-- Language-Aware Font Engine: Isolates Latin vs Devanagari fonts to prevent '▯▯▯' box bugs.
-- Zero-Dark-Screen Guarantee: Advanced multi-tone gradient fallbacks.
+Cinematic Documentary Pipeline v5.1 (Voice-Synced, AI-Image Edition, black-frame proof)
+
+What changed vs v4:
+- Every narration LINE gets its own AI-generated image, and the scene for that image
+  lasts exactly as long as that line's voice clip. Picture can no longer drift from voice.
+- No more random Wikimedia search results (that caused F-16 jets / Zoom calls / playbills).
+- Storytelling script: hook, short punchy lines, questions, varied pauses.
+- Slower, deeper voice + variable pauses (short / medium / long / dramatic).
+- Subtitles break into 5-word chunks and are timed per line.
+- Background music is now actually audible (old mix made it ~0.02 volume).
+
+Same env vars as before: TOPIC, LANGUAGE (hi/en), SCENES, VOICE, RESUME, GEMINI_API_KEY, GEMINI_MODEL
+New optional env vars:
+  STYLE              - visual style line added to EVERY image prompt (keeps the whole video consistent)
+  POLLINATIONS_TOKEN - optional free key from auth.pollinations.ai (removes the 15s-per-image wait + watermark)
+  POLL_MODEL         - optional image model name (leave empty for default)
+  IMG_GAP / IMG_TRIES / REPAIR_ROUNDS - patience settings (defaults 20s / 8 / 4)
 """
 
 import asyncio
-import io
+import hashlib
 import json
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 from urllib.parse import quote
+
 import requests
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import Image, ImageOps, ImageStat
 
 FPS = 25
 W, H = 1920, 1080
@@ -30,28 +44,46 @@ LANGUAGE = os.environ.get("LANGUAGE", "hi").strip().lower()  # "hi" or "en"
 if LANGUAGE == "en":
     DEFAULT_VOICE = "en-US-ChristopherNeural"
     DEFAULT_FONT = "DejaVuSans-Bold"
-    VOICE_RATE = "+8%"
+    VOICE_RATE = "-4%"
     VOICE_PITCH = "-2Hz"
 else:
-    DEFAULT_VOICE = "hi-IN-SwaraNeural"
+    DEFAULT_VOICE = "hi-IN-MadhurNeural"  # deeper male storyteller voice. Old one: hi-IN-SwaraNeural
     DEFAULT_FONT = "NotoSansDevanagari-Bold"
-    VOICE_RATE = "+10%"
-    VOICE_PITCH = "-1Hz"
+    VOICE_RATE = "-4%"
+    VOICE_PITCH = "-2Hz"
 
 VOICE = os.environ.get("VOICE", DEFAULT_VOICE)
+
+# Pause (seconds) added after a line's voice. Gemini picks one per line.
+PAUSES = {"short": 0.25, "medium": 0.6, "long": 1.0, "dramatic": 1.5}
+
+STYLE = os.environ.get(
+    "STYLE",
+    "cinematic historical illustration, painterly, dramatic lighting, rich warm earthy tones, "
+    "highly detailed, wide shot, no text, no letters, no watermark, no modern objects",
+).strip()
+
+POLLINATIONS_TOKEN = os.environ.get("POLLINATIONS_TOKEN", "").strip()
+POLL_MODEL = os.environ.get("POLL_MODEL", "").strip()
+# Patience settings (anonymous tier is slow and throttles hard; waiting is fine, black frames are not)
+IMG_GAP = float(os.environ.get("IMG_GAP", "3" if POLLINATIONS_TOKEN else "20"))  # seconds between requests
+IMG_TRIES = int(os.environ.get("IMG_TRIES", "8"))        # attempts per image per round
+REPAIR_ROUNDS = int(os.environ.get("REPAIR_ROUNDS", "4"))  # extra rounds for images that still failed
 
 WORK = Path("work")
 OUT = Path("out")
 
 BAD_WORDS = ("image", "tts", "live", "audio", "embed", "robotics", "computer", "vision")
-_used_urls = set()
+
 
 def fatal(msg: str) -> None:
     print("\nERROR: " + msg, flush=True)
     sys.exit(2)
 
+
 def log(msg: str) -> None:
     print(msg, flush=True)
+
 
 # ==================== Language-Aware Font Discovery ====================
 def get_font_path(lang: str) -> tuple:
@@ -79,17 +111,20 @@ def get_font_path(lang: str) -> tuple:
                 return c, Path(c).stem
     return "", DEFAULT_FONT
 
+
 FONT_FILE, FONT_NAME = get_font_path(LANGUAGE)
 log(f"Selected Font for {LANGUAGE.upper()}: {FONT_FILE or FONT_NAME}")
 
-# ==================== Dynamic Gemini Script Engine ====================
+# ==================== Gemini Script Engine ====================
 _good_model = None
+
 
 def gemini_key() -> str:
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         fatal("GEMINI_API_KEY is missing in repo secrets.")
     return key
+
 
 def get_live_models(key: str) -> list:
     url = f"{GEMINI_BASE}/models?pageSize=100"
@@ -105,16 +140,18 @@ def get_live_models(key: str) -> list:
             if usable:
                 def sort_priority(n: str) -> int:
                     nl = n.lower()
-                    if "lite" in nl or "8b" in nl:
-                        return 0
-                    if "flash" in nl:
+                    if "flash" in nl and "lite" not in nl:
+                        return 0  # better storytelling than lite
+                    if "lite" in nl:
                         return 1
                     return 2
+
                 usable.sort(key=sort_priority)
                 return usable
     except Exception:
         pass
-    return ["gemini-2.0-flash-lite", "gemini-1.5-flash"]
+    return ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"]
+
 
 def extract_json(text: str):
     t = text.strip()
@@ -125,8 +162,9 @@ def extract_json(text: str):
     except Exception:
         a, b = t.find("{"), t.rfind("}")
         if a >= 0 and b > a:
-            return json.loads(t[a : b + 1])
+            return json.loads(t[a: b + 1])
         raise
+
 
 def gemini_json(prompt: str, label: str):
     global _good_model
@@ -136,8 +174,8 @@ def gemini_json(prompt: str, label: str):
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "responseMimeType": "application/json",
-            "temperature": 0.7,
-            "maxOutputTokens": 8192,
+            "temperature": 0.8,
+            "maxOutputTokens": 16384,
         },
     }
 
@@ -150,12 +188,11 @@ def gemini_json(prompt: str, label: str):
         for model in models:
             url = f"{GEMINI_BASE}/models/{model}:generateContent"
             try:
-                r = requests.post(url, headers=headers, json=body, timeout=50)
+                r = requests.post(url, headers=headers, json=body, timeout=120)
                 if r.status_code == 200:
-                    resp_json = r.json()
-                    candidates_list = resp_json.get("candidates", [])
-                    if candidates_list:
-                        parts = candidates_list[0].get("content", {}).get("parts", [])
+                    cands = r.json().get("candidates", [])
+                    if cands:
+                        parts = cands[0].get("content", {}).get("parts", [])
                         text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
                         if text:
                             data = extract_json(text)
@@ -172,73 +209,102 @@ def gemini_json(prompt: str, label: str):
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing with Precision Entity Keywords ====================
+
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
 
+
 def make_script(topic: str, n_scenes: int) -> dict:
-    log(f"Generating precision-matched documentary script for: '{topic}' ({n_scenes} scenes)")
-    
-    lang_name = "English" if LANGUAGE == "en" else "Hindi"
-    
+    log(f"Generating storytelling script for: '{topic}' ({n_scenes} scenes x 3 lines)")
+
     if LANGUAGE == "en":
         lang_rules = (
-            "- title: Engaging English documentary title.\n"
-            "- description: 2-3 sentence English summary.\n"
-            "- narration: Deep documentary storytelling (26-32 words per scene). SCENE 1 MUST START WITH A QUESTION.\n"
-            "- callout: Clean 2-4 word milestone badge using plain English letters and numbers, NO EMOJIS.\n"
-            "- beats: Exactly 3 specific, highly recognizable proper nouns, landmarks, corporate entities, or historical keywords matching the exact micro-events of this scene.\n"
+            "LANGUAGE: English. Write 'line' as spoken narration, like a gripping documentary storyteller.\n"
         )
+        callout_rule = "plain English letters/numbers only, 2-4 words, NO emojis (e.g. 'June 1576', 'The Pass')"
     else:
         lang_rules = (
-            "- title: Engaging Hindi documentary title.\n"
-            "- description: 2-3 sentence Hindi summary.\n"
-            "- narration: पेशेवर डॉक्यूमेंट्री शैली में गंभीर किस्सागोई (25-32 शब्द प्रति दृश्य)। पहला दृश्य सवाल से शुरू हो।\n"
-            "- callout: बिना किसी इमोजी के साफ-सुथरा माइलस्टोन बैज।\n"
-            "- beats: इस दृश्य के सटीक प्रसंग से जुड़े ठीक 3 अंग्रेजी कीवर्ड या नाम (जैसे: 'Ratan Tata', 'Taj Hotel Mumbai', 'Tata Nano', 'Bombay House').\n"
+            "LANGUAGE: Hindi in Devanagari for every 'line'. Write the way a Hindi kissago (storyteller) SPEAKS: "
+            "simple everyday words, NOT textbook or heavily Sanskritised Hindi. Use '।' and commas for natural "
+            "breathing. Never mix Latin letters into 'line'.\n"
         )
+        callout_rule = "short Hindi badge in Devanagari, 2-4 words, NO emojis (e.g. 'जून 1576', 'हल्दीघाटी')"
 
     prompt = (
-        f"You are a master historical documentary filmmaker creating a high-retention video like IRON AND INK.\n"
-        f"Exact Topic / Subject: {topic}\n"
-        f"Language: {lang_name}\n"
-        f"Create exactly {n_scenes} chronological scenes covering this subject.\n"
+        "You are a master documentary storyteller writing a high-retention YouTube video.\n"
+        f"Topic: {topic}\n"
         f"{lang_rules}\n"
-        "Return pure JSON:\n"
-        '{\n'
-        '  "title": "Title",\n'
-        '  "description": "Summary",\n'
+        f"Create exactly {n_scenes} chronological scenes. Each scene has EXACTLY 3 beats.\n"
+        "A beat = one narration 'line' + the 'image' that will be shown while that exact line is spoken.\n\n"
+        "STORYTELLING RULES:\n"
+        "- Scene 1, beat 1 is a gripping HOOK: a startling question or fact. No greetings, no 'welcome'.\n"
+        "- Each 'line' is 8-14 words, ONE idea. At tense moments use short punchy lines (3-6 words).\n"
+        "- Tell it as a story with people, choices, danger and emotion, not a list of facts. Build tension, then reveal.\n"
+        "- Speak to the viewer now and then (e.g. 'Imagine...', 'But here is the twist...'). Ask a question roughly every 5 scenes.\n"
+        "- Stay factual. Do NOT invent dates, numbers, or quotes you are not sure about; say 'around' or leave them out.\n"
+        "- Final scene ends with a memorable one-line reflection.\n"
+        "- 'pause' controls the silence AFTER that line: 'short' (normal), 'medium' (end of a thought), "
+        "'long' (let it sink in), 'dramatic' (right before a big reveal). Use 'dramatic' only 3-5 times in the whole video.\n\n"
+        "IMAGE RULES (always in ENGLISH, 15-30 words):\n"
+        "- Show EXACTLY what the line says: subject, setting, action, mood, correct era/place.\n"
+        "- Name the specific people/places. Every time a main character appears, repeat the SAME physical description "
+        "so he/she looks the same across scenes.\n"
+        "- No text, signs, or lettering in the image. No modern objects unless the topic is modern.\n"
+        "- Vary shot types: wide landscape, close-up, over-the-shoulder, aerial, silhouette.\n\n"
+        f"callout (once per scene): {callout_rule}\n\n"
+        "Return pure JSON only:\n"
+        "{\n"
+        '  "title": "...", "description": "2-3 sentence summary",\n'
         '  "scenes": [\n'
-        '    {\n'
-        '      "narration": "...",\n'
-        '      "callout": "...",\n'
-        '      "beats": ["specific entity 1", "specific entity 2", "specific entity 3"]\n'
-        '    }\n'
-        '  ]\n'
-        '}'
+        '    {"callout": "...", "beats": [\n'
+        '      {"line": "...", "image": "...", "pause": "short"},\n'
+        '      {"line": "...", "image": "...", "pause": "short"},\n'
+        '      {"line": "...", "image": "...", "pause": "medium"}\n'
+        "    ]}\n"
+        "  ]\n"
+        "}"
     )
     data = gemini_json(prompt, label="full_script")
+
     scenes = []
     for s in data.get("scenes", [])[:n_scenes]:
-        beats = s.get("beats", [])
-        if not isinstance(beats, list) or len(beats) < 3:
-            base_p = topic
-            beats = [base_p, base_p, base_p]
-        scenes.append({
-            "narration": clean_text(s.get("narration", "")),
-            "callout": clean_text(s.get("callout", "")),
-            "beats": [clean_text(b) for b in beats[:3]]
-        })
+        beats = []
+        for b in s.get("beats", []):
+            if not isinstance(b, dict):
+                continue
+            line = clean_text(b.get("line", ""))
+            if len(line) < 3:
+                continue
+            pause = str(b.get("pause", "short")).strip().lower()
+            beats.append({
+                "line": line,
+                "image": clean_text(b.get("image", "")) or topic,
+                "pause": pause if pause in PAUSES else "short",
+            })
+        if beats:
+            scenes.append({"callout": clean_text(s.get("callout", "")), "beats": beats})
 
-    log(f"Script generated successfully: {len(scenes)} precision scenes ready.")
+    if not scenes:
+        fatal("Gemini returned no usable scenes.")
+
+    # Make sure every scene ends with at least a medium pause, and the hook gets room to land.
+    for sc in scenes:
+        if PAUSES[sc["beats"][-1]["pause"]] < PAUSES["medium"]:
+            sc["beats"][-1]["pause"] = "medium"
+    if PAUSES[scenes[0]["beats"][0]["pause"]] < PAUSES["long"]:
+        scenes[0]["beats"][0]["pause"] = "long"
+
+    log(f"Script ready: {len(scenes)} scenes, {sum(len(s['beats']) for s in scenes)} lines.")
     return {
         "topic": topic,
         "title": clean_text(data.get("title", topic)),
         "description": clean_text(data.get("description", "")),
         "scenes": scenes,
-                    }
-    # ==================== Precision Entity-Matched Visual Engine ====================
+    }
+
+
+# ==================== Image Engine (AI-generated, matched to each line) ====================
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -252,270 +318,326 @@ def fit_cover(img: Image.Image) -> Image.Image:
         img = img.crop((0, top, w, top + nh))
     return img.resize((W, H), Image.LANCZOS)
 
+
 def create_cinematic_gradient(path: Path, seed: int) -> None:
+    """Last-resort background. Deliberately warm and bright, never black."""
     random.seed(seed)
-    base = Image.new("RGB", (W, H), (20, 18, 25))
-    px = base.load()
-    c1 = (random.randint(15, 35), random.randint(15, 30), random.randint(35, 60))
-    c2 = (random.randint(40, 70), random.randint(25, 45), random.randint(20, 35))
+    c1 = (random.randint(90, 120), random.randint(70, 95), random.randint(50, 70))
+    c2 = (random.randint(150, 190), random.randint(115, 145), random.randint(80, 100))
+    strip = Image.new("RGB", (1, H))
+    px = strip.load()
     for y in range(H):
-        factor = y / H
-        r = int(c1[0] * (1 - factor) + c2[0] * factor)
-        g = int(c1[1] * (1 - factor) + c2[1] * factor)
-        b = int(c1[2] * (1 - factor) + c2[2] * factor)
-        for x in range(W):
-            noise = random.randint(-6, 6)
-            px[x, y] = (max(0, min(255, r + noise)), max(0, min(255, g + noise)), max(0, min(255, b + noise)))
-    base.save(path, quality=92)
+        f = y / H
+        px[0, y] = tuple(int(c1[i] * (1 - f) + c2[i] * f) for i in range(3))
+    strip.resize((W, H)).save(path, quality=92)
 
-def fetch_image_precision(query_text: str, path: Path, seed: int, topic: str, prev_images: list) -> bool:
-    wiki_headers = {
-        "User-Agent": "HistoricalDocumentaryPipeline/4.0 (Contact: github@actions.com) PythonRequests/2.31"
-    }
-    
-    clean_q = re.sub(r"[^a-zA-Z0-9\s]", "", query_text).strip()
-    
-    search_queries = [
-        clean_q,
-        f"{clean_q} photography",
-        f"{topic} corporate building",
-        f"{topic} historical event",
-        "Mumbai corporate architecture landmark"
-    ]
 
-    for sq in search_queries:
-        if not sq:
-            continue
+_seen_hashes = set()
+
+
+def is_good_image(img: Image.Image) -> bool:
+    """Reject black / near-black / flat frames (rate-limit or error placeholders)."""
+    g = img.convert("L").resize((160, 90))
+    st = ImageStat.Stat(g)
+    return st.mean[0] > 28 and st.stddev[0] > 14
+
+
+def file_is_good(path: Path) -> bool:
+    try:
+        if not path.exists() or path.stat().st_size < 10000:
+            return False
+        return is_good_image(Image.open(path).convert("RGB"))
+    except Exception:
+        return False
+
+
+_last_img_request = 0.0
+
+
+def _throttle() -> None:
+    global _last_img_request
+    wait = IMG_GAP - (time.time() - _last_img_request)
+    if wait > 0:
+        time.sleep(wait)
+    _last_img_request = time.time()
+
+
+def generate_image(visual: str, path: Path, seed: int) -> bool:
+    """Try hard. Returns True only if a real, non-black, non-duplicate image was saved."""
+    full_prompt = f"{visual}, {STYLE}"[:450]
+    url = f"https://image.pollinations.ai/prompt/{quote(full_prompt)}"
+    headers = {"User-Agent": "DocumentaryPipeline/5.1"}
+    if POLLINATIONS_TOKEN:
+        headers["Authorization"] = f"Bearer {POLLINATIONS_TOKEN}"
+
+    for attempt in range(IMG_TRIES):
+        params = {"width": W, "height": H, "seed": seed + attempt * 101, "nologo": "true"}
+        if POLL_MODEL:
+            params["model"] = POLL_MODEL
+        _throttle()
+        status = None
         try:
-            api_url = "https://commons.wikimedia.org/w/api.php"
-            params = {
-                "action": "query", "generator": "search", "gsrsearch": sq,
-                "gsrnamespace": 6, "gsrlimit": 20, "prop": "imageinfo",
-                "iiprop": "url|mime", "iiurlwidth": 1280, "format": "json"
-            }
-            r = requests.get(api_url, params=params, headers=wiki_headers, timeout=8)
-            if r.status_code == 200:
-                pages = r.json().get("query", {}).get("pages", {})
-                items = list(pages.values())
-                random.shuffle(items)
-                for info in items:
-                    imginfo = info.get("imageinfo", [{}])[0]
-                    mime = imginfo.get("mime", "")
-                    url = imginfo.get("thumburl") or imginfo.get("url")
-                    if url and url not in _used_urls and ("jpeg" in mime or "png" in mime or "jpg" in mime):
-                        img_resp = requests.get(url, headers=wiki_headers, timeout=8)
-                        if img_resp.status_code == 200 and len(img_resp.content) > 15000:
-                            img = Image.open(io.BytesIO(img_resp.content)).convert("RGB")
-                            if img.width >= 450 and img.height >= 300:
-                                _used_urls.add(url)
-                                fit_cover(img).save(path, quality=94)
-                                return True
-        except Exception:
-            continue
-
-    if prev_images:
-        try:
-            src_img = Image.open(random.choice(prev_images)).convert("RGB")
-            src_img = ImageOps.mirror(src_img)
-            w, h = src_img.size
-            cropped = src_img.crop((int(w * 0.1), int(h * 0.1), int(w * 0.9), int(h * 0.9))).resize((W, H), Image.LANCZOS)
-            cropped.save(path, quality=92)
-            return True
-        except Exception:
-            pass
-
-    create_cinematic_gradient(path, seed)
+            r = requests.get(url, params=params, headers=headers, timeout=180)
+            status = r.status_code
+            ctype = r.headers.get("content-type", "")
+            if status == 200 and "image" in ctype and len(r.content) > 15000:
+                digest = hashlib.md5(r.content).hexdigest()
+                tmp = path.with_suffix(".raw")
+                tmp.write_bytes(r.content)
+                img = Image.open(tmp).convert("RGB")
+                tmp.unlink(missing_ok=True)
+                if digest in _seen_hashes:
+                    log("    got a repeated image (likely a placeholder), retrying")
+                elif not is_good_image(img):
+                    log("    got a black/flat image, retrying")
+                else:
+                    _seen_hashes.add(digest)
+                    fit_cover(img).save(path, quality=94)
+                    return True
+        except Exception as e:
+            log(f"    request error: {type(e).__name__}: {e}")
+        # back off: longer each time, much longer if we were rate-limited
+        base = 60 if status == 429 else 25
+        wait = min(240, base * (attempt + 1))
+        log(f"    attempt {attempt + 1}/{IMG_TRIES} failed (status {status}); waiting {wait}s")
+        time.sleep(wait)
     return False
 
-# ==================== Voiceover Engine ====================
+
+def borrow_neighbor(idx: int, paths: list, good: list) -> bool:
+    """Give a failed image a mirrored/cropped copy of the nearest good image (never black)."""
+    order = sorted((i for i in range(len(paths)) if good[i]), key=lambda i: abs(i - idx))
+    for i in order:
+        try:
+            src = ImageOps.mirror(Image.open(paths[i]).convert("RGB"))
+            w, h = src.size
+            src.crop((int(w * 0.12), int(h * 0.12), int(w * 0.88), int(h * 0.88))).resize((W, H), Image.LANCZOS).save(paths[idx], quality=92)
+            return True
+        except Exception:
+            continue
+    return False
+    # ==================== Voiceover Engine ====================
 async def _edge(text: str, path: Path) -> None:
     import edge_tts
     communicate = edge_tts.Communicate(text, VOICE, rate=VOICE_RATE, pitch=VOICE_PITCH)
     await communicate.save(str(path))
 
+
 def audio_duration(path: Path) -> float:
     try:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-            capture_output=True, text=True
+            capture_output=True, text=True,
         ).stdout.strip()
         return float(out) if out else 0.0
     except Exception:
         return 0.0
 
+
 def speak(text: str, path: Path) -> None:
     text = clean_text(text)
+    if text and text[-1] not in ".?!।…":
+        text += "।" if LANGUAGE == "hi" else "."
     for _ in range(3):
         try:
             asyncio.run(_edge(text, path))
-            if path.exists() and path.stat().st_size > 1000 and audio_duration(path) > 0.8:
+            if path.exists() and path.stat().st_size > 1000 and audio_duration(path) > 0.4:
                 return
         except Exception:
             time.sleep(2)
     from gtts import gTTS
     gTTS(text, lang=LANGUAGE).save(str(path))
 
-# ==================== Dynamic Subtitles ====================
+
+# ==================== Subtitles (timed per line) ====================
 def format_srt_time(sec: float) -> str:
-    millis = int((sec % 1) * 1000)
+    millis = int(round((sec - int(sec)) * 1000))
+    if millis == 1000:
+        sec += 1
+        millis = 0
     s = int(sec)
     m, s = divmod(s, 60)
     h, m = divmod(m, 60)
     return f"{h:02d}:{m:02d}:{s:02d},{millis:03d}"
 
-def create_subtitles(scenes: list, durs: list, srt_path: Path):
-    cur_time = 0.0
-    lines = []
-    sub_idx = 1
-    for sc, dur in zip(scenes, durs):
-        scene_start = cur_time
-        scene_end = cur_time + dur
-        cur_time = scene_end
-        words = sc["narration"].split()
-        chunk_size = 7
-        chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
+
+def create_subtitles(timeline: list, srt_path: Path) -> None:
+    """timeline items: (start_sec, speech_sec, text)"""
+    out = []
+    idx = 1
+    for start, speech, text in timeline:
+        words = text.split()
+        chunks = [words[i:i + 5] for i in range(0, len(words), 5)]
+        if len(chunks) > 1 and len(chunks[-1]) <= 2:  # avoid a tiny orphan chunk
+            chunks[-2].extend(chunks[-1])
+            chunks.pop()
         if not chunks:
             continue
-        chunk_dur = dur / len(chunks)
-        for i, chk in enumerate(chunks):
-            c_start = scene_start + (i * chunk_dur)
-            c_end = c_start + chunk_dur
-            text = " ".join(chk)
-            lines.append(f"{sub_idx}\n{format_srt_time(c_start)} --> {format_srt_time(c_end)}\n{text}\n")
-            sub_idx += 1
-    srt_path.write_text("\n".join(lines), encoding="utf-8")
+        total_words = sum(len(c) for c in chunks)
+        t = start
+        for c in chunks:
+            d = speech * len(c) / total_words
+            out.append(f"{idx}\n{format_srt_time(t)} --> {format_srt_time(t + d)}\n{' '.join(c)}\n")
+            idx += 1
+            t += d
+    srt_path.write_text("\n".join(out), encoding="utf-8")
 
-# ==================== Multi-Beat Sub-Clip Rendering ====================
-def render_multi_beat_clip(scene_data: dict, aud_path: Path, clip_path: Path, scene_idx: int, total_dur: float, topic: str, valid_prev: list) -> None:
-    beats = scene_data.get("beats", [topic, topic, topic])
-    n_beats = len(beats)
-    beat_dur = total_dur / n_beats
-    
-    beat_clips = []
-    for b_idx, beat_prompt in enumerate(beats):
-        b_img = WORK / f"scene_{scene_idx:03d}_beat_{b_idx}.jpg"
-        if not (b_img.exists() and b_img.stat().st_size > 10000):
-            log(f"  Fetching Scene {scene_idx + 1} Beat {b_idx + 1}/3 for entity: '{beat_prompt}'")
-            fetch_image_precision(beat_prompt, b_img, seed=6000 + (scene_idx * 50) + b_idx, topic=topic, prev_images=valid_prev)
-            if b_img.exists() and b_img.stat().st_size > 10000:
-                valid_prev.append(b_img)
-        
-        sub_tmp = WORK / f"sub_{scene_idx}_{b_idx}.mp4"
-        frames = int(beat_dur * FPS)
-        cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
-        z = f"1+0.08*on/{frames}" if b_idx % 2 == 0 else f"1.08-0.08*on/{frames}"
-        
-        vf = (
-            f"crop=iw:ih-45:0:0,"
-            f"scale=3840:2160:flags=lanczos,"
-            f"zoompan=z='{z}':x='{cx}':y='{cy}':d={frames}:s={W}x{H}:fps={FPS},format=yuv420p"
-        )
-        
-        if b_idx == 0 and scene_data.get("callout"):
-            callout = scene_data["callout"]
-            normalized = callout.replace("•", "-").replace(":", " - ").replace("'", "").replace('"', "")
-            if LANGUAGE == "en":
-                clean_callout = re.sub(r"[^a-zA-Z0-9\s\-\,\.\(\)]", "", normalized).strip()
-            else:
-                clean_callout = re.sub(r"[^\w\s\d\-\,\.\(\)\u0900-\u097F]", "", normalized).strip()
-            clean_callout = re.sub(r"\s+", " ", clean_callout)
-            
-            if len(clean_callout) > 1:
-                badge_dur = min(3.0, beat_dur * 0.8)
-                box_w = max(240, min(880, len(clean_callout) * 14 + 55))
-                font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else f"font='{DEFAULT_FONT}'"
-                vf += (
-                    f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.85:t=fill:enable='between(t,0.2,{badge_dur})'"
-                    f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.2,{badge_dur})'"
-                    f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=23:x=105:y=98:"
-                    f"{font_opt}:enable='between(t,0.2,{badge_dur})'"
-                )
 
-        subprocess.run([
-            "ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-i", str(b_img),
-            "-vf", vf, "-t", f"{beat_dur:.3f}", "-r", str(FPS),
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", str(sub_tmp)
-        ], check=True)
-        beat_clips.append(sub_tmp)
+# ==================== Beat clip: one image + its own voice line ====================
+def render_beat_clip(img: Path, aud: Path, clip: Path, frames: int, dur: float, pad: float,
+                     idx_in_video: int, callout: str) -> None:
+    cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+    z = f"1+0.08*on/{frames}" if idx_in_video % 2 == 0 else f"1.08-0.08*on/{frames}"
 
-    beat_list = WORK / f"beats_{scene_idx}.txt"
-    beat_list.write_text("".join(f"file '{bc.resolve()}'\n" for bc in beat_clips))
-    
-    scene_video_only = WORK / f"scene_video_{scene_idx}.mp4"
+    vf = (
+        # crop the bottom strip (hides any generator watermark), then fill the frame again
+        "crop=iw:ih-70:0:0,"
+        "scale=3840:2160:force_original_aspect_ratio=increase,crop=3840:2160,"
+        f"zoompan=z='{z}':x='{cx}':y='{cy}':d={frames}:s={W}x{H}:fps={FPS},format=yuv420p"
+    )
+
+    if callout:
+        normalized = callout.replace("•", "-").replace(":", " - ").replace("'", "").replace('"', "")
+        if LANGUAGE == "en":
+            clean_callout = re.sub(r"[^a-zA-Z0-9\s\-\,\.\(\)]", "", normalized).strip()
+        else:
+            clean_callout = re.sub(r"[^\w\s\d\-\,\.\(\)\u0900-\u097F]", "", normalized).strip()
+        clean_callout = re.sub(r"\s+", " ", clean_callout)
+        if len(clean_callout) > 1:
+            badge_dur = min(3.0, dur * 0.8)
+            box_w = max(240, min(880, len(clean_callout) * 14 + 55))
+            font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else f"font='{DEFAULT_FONT}'"
+            vf += (
+                f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.85:t=fill:enable='between(t,0.2,{badge_dur:.2f})'"
+                f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.2,{badge_dur:.2f})'"
+                f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=23:x=105:y=98:"
+                f"{font_opt}:enable='between(t,0.2,{badge_dur:.2f})'"
+            )
+
+    tmp = clip.with_name(clip.stem + ".tmp.mp4")
     subprocess.run([
-        "ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
-        "-i", str(beat_list), "-c", "copy", str(scene_video_only)
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", str(img), "-i", str(aud),
+        "-vf", vf,
+        "-af", f"apad=pad_dur={pad:.3f},aresample=44100",
+        "-ac", "2", "-t", f"{dur:.3f}",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p", "-r", str(FPS),
+        "-c:a", "aac", "-b:a", "192k",
+        str(tmp),
     ], check=True)
+    os.replace(tmp, clip)
 
-    tmp_clip = clip_path.with_name(clip_path.stem + ".tmp.mp4")
-    subprocess.run([
-        "ffmpeg", "-y", "-loglevel", "error", "-i", str(scene_video_only), "-i", str(aud_path),
-        "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
-        "-shortest", str(tmp_clip)
-    ], check=True)
-    os.replace(tmp_clip, clip_path)
 
+# ==================== Build ====================
 def build_video(data: dict) -> None:
     WORK.mkdir(exist_ok=True)
     OUT.mkdir(exist_ok=True)
     scenes = data["scenes"]
-    topic = data.get("topic", "History")
-    n = len(scenes)
+    total_lines = sum(len(s["beats"]) for s in scenes)
 
-    log("=== Step 1/2: Recording Documentary Narration ===")
-    auds, durs = [], []
-    for i, sc in enumerate(scenes):
-        aud = WORK / f"aud_{i:03d}.mp3"
-        if not (aud.exists() and aud.stat().st_size > 1000 and audio_duration(aud) > 0.8):
-            log(f"Recording Scene {i + 1}/{n}...")
-            speak(sc["narration"], aud)
-        auds.append(aud)
-        durs.append(audio_duration(aud) + 0.4)
+    log("=== Step 1/3: Recording narration (one clip per line) ===")
+    jobs = []  # one per beat
+    n = 0
+    for si, sc in enumerate(scenes):
+        for bi, b in enumerate(sc["beats"]):
+            n += 1
+            aud = WORK / f"aud_{si:03d}_{bi}.mp3"
+            if not (aud.exists() and aud.stat().st_size > 1000 and audio_duration(aud) > 0.4):
+                log(f"Recording line {n}/{total_lines}...")
+                speak(b["line"], aud)
+            speech = audio_duration(aud)
+            pad = PAUSES.get(b.get("pause", "short"), 0.25)
+            frames = max(1, round((speech + pad) * FPS))
+            dur = frames / FPS
+            jobs.append({
+                "si": si, "bi": bi, "line": b["line"], "visual": b["image"], "aud": aud,
+                "speech": speech, "pad": dur - speech, "frames": frames, "dur": dur,
+                "callout": sc.get("callout", "") if bi == 0 else "",
+            })
 
-    log("=== Step 2/2: Generating Precision Entity Visuals & Rendering ===")
-    clips = []
-    valid_prev = []
-    for i in range(n):
-        clip = WORK / f"clip_{i:03d}.mp4"
+    log("=== Step 2/3: Generating one image per line (slow and patient) ===")
+    if not POLLINATIONS_TOKEN:
+        log(f"(anonymous tier: ~{int(IMG_GAP)}s per image, about {total_lines * int(IMG_GAP) // 60} min minimum)")
+    img_paths = [WORK / f"img_{j['si']:03d}_{j['bi']}.jpg" for j in jobs]
+    good = [False] * len(jobs)
+
+    # Round 0 = main pass. Rounds 1..N = repair passes for anything that still failed.
+    for rnd in range(REPAIR_ROUNDS + 1):
+        pending = [k for k in range(len(jobs)) if not good[k]]
+        if not pending:
+            break
+        if rnd > 0:
+            log(f"--- Repair round {rnd}/{REPAIR_ROUNDS}: {len(pending)} image(s) left. Cooling down 3 min first ---")
+            time.sleep(180)
+        for k in pending:
+            j = jobs[k]
+            if file_is_good(img_paths[k]):  # valid image already cached from a previous run
+                good[k] = True
+                _seen_hashes.add(hashlib.md5(img_paths[k].read_bytes()).hexdigest())
+                continue
+            # a cached black image or stale clip must not survive
+            img_paths[k].unlink(missing_ok=True)
+            (WORK / f"clip_{j['si']:03d}_{j['bi']}.mp4").unlink(missing_ok=True)
+            log(f"Image {k + 1}/{total_lines}: {j['visual'][:80]}")
+            if generate_image(j["visual"], img_paths[k], seed=7000 + k):
+                good[k] = True
+
+    missing = [k for k in range(len(jobs)) if not good[k]]
+    if missing:
+        log(f"WARNING: {len(missing)} image(s) could not be generated; borrowing nearby images instead of black frames.")
+        for k in missing:
+            if not borrow_neighbor(k, img_paths, good):
+                create_cinematic_gradient(img_paths[k], 7000 + k)
+            (WORK / f"clip_{jobs[k]['si']:03d}_{jobs[k]['bi']}.mp4").unlink(missing_ok=True)
+
+    log("Rendering clips...")
+    clips, timeline = [], []
+    t_cursor = 0.0
+    for k, j in enumerate(jobs):
+        clip = WORK / f"clip_{j['si']:03d}_{j['bi']}.mp4"
         if not (clip.exists() and clip.stat().st_size > 1000):
-            log(f"Processing Scene {i + 1}/{n}...")
-            render_multi_beat_clip(scenes[i], auds[i], clip, i, durs[i], topic, valid_prev)
+            render_beat_clip(img_paths[k], j["aud"], clip, j["frames"], j["dur"], j["pad"], k, j["callout"])
         clips.append(clip)
+        timeline.append((t_cursor, j["speech"], j["line"]))
+        t_cursor += j["dur"]
 
+    log("=== Step 3/3: Final assembly ===")
     listfile = WORK / "list.txt"
     listfile.write_text("".join(f"file '{c.resolve()}'\n" for c in clips))
-
     raw_concat = WORK / "concat_raw.mp4"
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
          "-i", str(listfile), "-c", "copy", str(raw_concat)],
-        check=True
+        check=True,
     )
 
     srt_path = WORK / "subtitles.srt"
-    create_subtitles(scenes, durs, srt_path)
+    create_subtitles(timeline, srt_path)
 
-    log("Synthesizing harmonic documentary background score...")
+    log("Synthesizing background score...")
     bg_music = WORK / "bg_music.mp3"
-    total_dur = sum(durs)
+    total_dur = t_cursor
     expr = (
         "(sin(110*2*PI*t)*0.35 + sin(164.81*2*PI*t)*0.25 + "
         "sin(220*2*PI*t)*0.20 + sin(261.63*2*PI*t)*0.15) * (0.75 + 0.25*sin(0.25*2*PI*t))"
     )
     subprocess.run([
         "ffmpeg", "-y", "-f", "lavfi",
-        "-i", f"aevalsrc='{expr}':s=44100:d={total_dur}",
-        "-af", "lowpass=f=900,volume=0.14",
-        str(bg_music)
+        "-i", f"aevalsrc='{expr}':s=44100:d={total_dur:.2f}",
+        "-af", f"lowpass=f=900,afade=t=in:d=3,afade=t=out:st={max(0, total_dur - 4):.2f}:d=4",
+        str(bg_music),
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     video_with_audio = WORK / "video_with_audio.mp4"
     if bg_music.exists() and bg_music.stat().st_size > 1000:
+        # music at ~10% of voice. amix halves both inputs, so volume=2 restores the voice level.
         subprocess.run([
             "ffmpeg", "-y", "-loglevel", "error",
             "-i", str(raw_concat), "-i", str(bg_music),
-            "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:weights=1 0.14[a]",
-            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", str(video_with_audio)
+            "-filter_complex",
+            "[1:a]volume=0.10[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]",
+            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            str(video_with_audio),
         ], check=True)
     else:
         video_with_audio = raw_concat
@@ -527,26 +649,28 @@ def build_video(data: dict) -> None:
         f"'FontName={sub_font},FontSize=22,PrimaryColour=&H0000FFFF,"
         "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=55,Alignment=2'"
     )
-
-    log("Burning in clean documentary subtitles...")
+    log("Burning in subtitles...")
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video_with_audio),
          "-vf", subtitle_filter, "-c:v", "libx264", "-crf", "22", "-preset", "veryfast",
          "-c:a", "copy", "-movflags", "+faststart", str(final)],
-        check=True
+        check=True,
     )
-    log(f"COMPLETED! Final video saved to {final}")
+
+    (OUT / "title.txt").write_text(data.get("title", ""), encoding="utf-8")
+    (OUT / "description.txt").write_text(data.get("description", ""), encoding="utf-8")
+    log(f"COMPLETED! Final video saved to {final} ({total_dur:.0f}s)")
+
 
 # ==================== Main Runner ====================
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "full"
     topic = os.environ.get("TOPIC", "The Rise and Fall of the Roman Empire").strip()
-    n = int(os.environ.get("SCENES", "24") or 24)
+    n = int(os.environ.get("SCENES", "20") or 20)
 
     if mode == "full" and os.environ.get("RESUME") != "1":
         for p in [WORK, OUT]:
             if p.exists():
-                import shutil
                 shutil.rmtree(p)
         WORK.mkdir(exist_ok=True)
         OUT.mkdir(exist_ok=True)
@@ -564,6 +688,6 @@ def main() -> None:
 
     build_video(data)
 
+
 if __name__ == "__main__":
     main()
-    
