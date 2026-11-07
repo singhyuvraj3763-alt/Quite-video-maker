@@ -1,71 +1,69 @@
-name: Make Video Pipeline
+name: Make Documentary Video
 
 on:
   workflow_dispatch:
     inputs:
-      language:
-        description: 'Select Language'
-        required: true
-        default: 'hi'
-        type: choice
-        options:
-          - hi
-          - en
       topic:
-        description: 'Video Topic'
+        description: "Video topic"
         required: true
-        default: ''
+        default: "Battle of Haldighati"
+      language:
+        description: "hi or en"
+        required: true
+        default: "hi"
       scenes:
-        description: 'Number of Scenes'
+        description: "Number of scenes (3 lines each)"
         required: true
-        default: '24'
+        default: "20"
+      style:
+        description: "Image style line (optional)"
+        required: false
+        default: ""
+      resume:
+        description: "Resume a previous run? (1 = yes, leave empty = no)"
+        required: false
+        default: ""
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 240
     steps:
-      - name: Checkout Repository
+      - name: Check out repo
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-          cache: 'pip'
+          python-version: "3.11"
 
-      - name: Install System Dependencies & Fonts
+      - name: Install ffmpeg and fonts
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto-core fonts-dejavu-core
 
-      - name: Install Python Packages
-        run: |
-          pip install --upgrade pip
-          pip install requests pillow edge-tts gTTS
-      - name: Clean Old Assets & Cache
-        run: |
-          rm -rf work/ out/
-          mkdir -p work out
-          
-      - name: Verify Script Syntax
-        run: |
-          python -m py_compile make_video.py
+      - name: Install Python packages
+        run: pip install requests pillow edge-tts gTTS
 
-      - name: Run Video Automation Pipeline
+      - name: Build video
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TOPIC: ${{ github.event.inputs.topic || 'The history of Marwar' }}
-          LANGUAGE: ${{ github.event.inputs.language || 'hi' }}
-          SCENES: ${{ github.event.inputs.scenes || '24' }}
+          POLLINATIONS_TOKEN: ${{ secrets.POLLINATIONS_TOKEN }}
+          TOPIC: ${{ github.event.inputs.topic }}
+          LANGUAGE: ${{ github.event.inputs.language }}
+          SCENES: ${{ github.event.inputs.scenes }}
+          RESUME: ${{ github.event.inputs.resume }}
         run: |
+          if [ -n "${{ github.event.inputs.style }}" ]; then
+            export STYLE="${{ github.event.inputs.style }}"
+          fi
           python make_video.py full
 
-      - name: Upload Final Video
-        uses: actions/upload-artifact@v4
+      - name: Upload video
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: documentary-video-${{ github.event.inputs.language || 'hi' }}
-          path: out/final.mp4
-          retention-days: 7
-          
+          name: documentary-video
+          path: |
+            out/
+            script.json
