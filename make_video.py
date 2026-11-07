@@ -2,10 +2,10 @@
 Professional Cinematic Documentary Automation Pipeline (IRON & INK Style)
 - Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
 - Seamless English & Hindi support via LANGUAGE environment variable ("hi" or "en")
-- High-retention cinematic question hooks for Scene 1
+- High-retention question hooks for Scene 1 + mid-video narrative tension twists
 - Emoji-free, clean professional milestone badges & lower thirds
 - Voice tuning optimized for deep studio narration pacing
-- Randomized Wikimedia Commons search tailored strictly to the topic
+- Randomized Wikimedia Commons search tailored strictly to the topic with AI fallback
 """
 
 import asyncio
@@ -164,7 +164,7 @@ def gemini_json(prompt: str, label: str):
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing (Documentary Standard) ====================
+# ==================== Script Processing with Mid-Video Hooks ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
@@ -176,15 +176,19 @@ def make_script(topic: str, n_scenes: int) -> dict:
         lang_rules = (
             "- title: Engaging English documentary title.\n"
             "- description: 2-3 sentence English summary.\n"
-            "- narration: Deep, professional documentary storytelling (28-34 words per scene). SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION (e.g., 'Did you know that thousands of years ago...').\n"
-            "- callout: Clean 2-4 word milestone badge with NO EMOJIS (e.g., '1459 • Mehrangarh Fort' or 'Battle of Hastings'). Leave empty \"\" if no milestone.\n"
+            "- narration: Deep, professional documentary storytelling (28-34 words per scene).\n"
+            "  * SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION (e.g., 'Did you know that...').\n"
+            "  * MID-VIDEO SCENES (around 35% and 70% through) MUST INCLUDE PATTERN INTERRUPTS / MINI-HOOKS (e.g., 'Just when everything seemed lost, a terrifying new threat emerged...').\n"
+            "- callout: Clean 2-4 word milestone badge with NO EMOJIS (e.g., '1459 • Mehrangarh Fort'). Leave empty \"\" if no milestone.\n"
         )
     else:
         lang_rules = (
             "- title: Engaging Hindi documentary title.\n"
             "- description: 2-3 sentence Hindi summary.\n"
-            "- narration: पेशेवर डॉक्यूमेंट्री शैली में गंभीर और रोमांचक किस्सागोई (25-32 शब्द प्रति दृश्य)। पहला दृश्य (Scene 1) एक जबरदस्त जिज्ञासा भरे सवाल से शुरू होना चाहिए (जैसे: 'क्या आप जानते हैं कि... आदिकाल में...').\n"
-            "- callout: बिना किसी इमोजी के साफ-सुथरा माइलस्टोन बैज (जैसे: '1459 • मेहरानगढ़ दुर्ग' या 'हेस्टिंग्स का युद्ध'). यदि ज़रूरत न हो तो खाली \"\" छोड़ें।\n"
+            "- narration: पेशेवर डॉक्यूमेंट्री शैली में गंभीर और रोमांचक किस्सागोई (25-32 शब्द प्रति दृश्य)।\n"
+            "  * पहला दृश्य (Scene 1) एक जबरदस्त जिज्ञासा भरे सवाल से शुरू होना चाहिए।\n"
+            "  * बीच के दृश्यों (लगभग 35% और 70% हिस्से पर) में एक मिनी-हुक या रोमांचक मोड़ (Pattern Interrupt) जरूर होना चाहिए (जैसे: 'लेकिन तभी एक ऐसा खौफनाक मंजर सामने आया...').\n"
+            "- callout: बिना किसी इमोजी के साफ-सुथरा माइलस्टोन बैज (जैसे: '1459 • मेहरानगढ़ दुर्ग'). यदि ज़रूरत न हो तो खाली \"\" छोड़ें。\n"
         )
 
     prompt = (
@@ -194,7 +198,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
         f"Create exactly {n_scenes} chronological scenes covering this subject from start to finish.\n"
         "CRITICAL RULE FOR IMAGES: Every single scene MUST have a 100% UNIQUE 'image_prompt' for historical paintings, vintage maps, museum artifacts, or architecture.\n"
         "Guidelines:\n"
-        "- Hook the listener immediately in Scene 1 with dramatic narrative tension and a question.\n"
+        "- Maintain relentless narrative tension throughout the entire video.\n"
         f"{lang_rules}"
         "- image_prompt: 3-5 specific English keywords for historical artwork, oil paintings, or architecture. Cinematic, 8k, museum lighting. No text or logos.\n"
         "Return pure JSON:\n"
@@ -215,7 +219,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
             "callout": clean_text(s.get("callout", ""))
         })
 
-    log(f"Script generated successfully: {len(scenes)} scenes ready.")
+    log(f"Script generated successfully with hooks: {len(scenes)} scenes ready.")
     return {
         "topic": topic,
         "title": clean_text(data.get("title", topic)),
@@ -223,7 +227,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
         "scenes": scenes,
     }
 
-# ==================== High-Res Visuals Engine ====================
+# ==================== High-Res Visuals Engine with AI Fallback ====================
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -283,7 +287,7 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
         except Exception:
             continue
 
-    # Guaranteed AI Cinematic Fallback
+    # Guaranteed AI Cinematic Fallback (Prevents dark screens)
     safe_prompt = quote(f"{prompt}, oil painting, classical historical artwork, museum lighting, cinematic, 8k")
     ai_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=1280&height=720&seed={seed + random.randint(1,9999)}&nologo=true&model=turbo"
     try:
@@ -376,7 +380,6 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     f = frames
     cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
     
-    # Smooth documentary Ken Burns camera movements
     fx_styles = [
         (f"1+0.12*on/{f}", cx, cy),
         (f"1.12-0.12*on/{f}", cx, cy),
@@ -392,7 +395,7 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     )
 
     if callout and len(callout.strip()) > 1:
-        # STRICTLY REMOVE ALL EMOJIS AND UNSUPPORTED SYMBOLS FOR CLEAN TEXT RENDERING
+        # STRICTLY STRIP EMOJIS SO FONT RENDERING NEVER FAILS
         clean_callout = re.sub(r'[^\w\s\d\•\-\,\.\(\)]', '', callout).strip()
         
         if len(clean_callout) > 1:
@@ -508,4 +511,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
+        
