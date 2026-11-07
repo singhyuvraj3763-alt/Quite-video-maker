@@ -57,7 +57,6 @@ def log(msg: str) -> None:
 # ==================== Language-Aware Font Discovery (Fixes ▯▯▯ Box Bug) ====================
 def get_font_path(lang: str) -> tuple:
     if lang == "en":
-        # Strictly Latin fonts with full English A-Z support (NEVER Devanagari)
         candidates = [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -73,7 +72,6 @@ def get_font_path(lang: str) -> tuple:
             if ("dejavu" in name_low or "liberation" in name_low or "freesans" in name_low) and "bold" in name_low:
                 return str(p), p.stem
     else:
-        # Hindi Devanagari fonts first
         candidates = [
             "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
             "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
@@ -244,7 +242,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
         "description": clean_text(data.get("description", "")),
         "scenes": scenes,
     }
-# ==================== Bulletproof Multi-Layer Visuals Engine ====================
+    # ==================== Bulletproof Multi-Layer Visuals Engine ====================
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -261,7 +259,7 @@ def fit_cover(img: Image.Image) -> Image.Image:
 def create_vintage_canvas(path: Path, seed: int) -> None:
     """Creates a rich textured historical parchment/vignette canvas so screen is NEVER blank."""
     random.seed(seed)
-     base = Image.new("RGB", (W, H), (44, 34, 24))
+    base = Image.new("RGB", (W, H), (44, 34, 24))
     px = base.load()
     for y in range(0, H, 4):
         for x in range(0, W, 4):
@@ -276,7 +274,6 @@ def create_vintage_canvas(path: Path, seed: int) -> None:
     base.save(path, quality=92)
 
 def fetch_image(scene_info: dict, path: Path, seed: int, topic: str, prev_images: list) -> bool:
-    # Compliant Wikimedia User-Agent + Browser User-Agent for AI endpoints
     wiki_headers = {
         "User-Agent": "HistoricalDocumentaryPipeline/2.0 (https://github.com/actions; contact@github.com) PythonRequests/2.31"
     }
@@ -290,7 +287,6 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str, prev_images
     short_kw = " ".join(words[:2]) if words else topic
     topic_short = " ".join([w for w in re.findall(r"\b[A-Za-z]+\b", topic) if len(w) > 3][:2]) or topic
 
-    # LAYER 1: Wikimedia Commons with short, high-hit queries + filetype:bitmap
     wiki_queries = [
         f"{wiki_q} filetype:bitmap" if wiki_q else "",
         f"{short_kw} painting filetype:bitmap",
@@ -334,7 +330,6 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str, prev_images
         except Exception:
             continue
 
-    # LAYER 2: Pollinations AI with 45-second timeout (No broken model=turbo flag)
     clean_ai_prompt = " ".join(words[:7]) if words else f"{topic} historical oil painting"
     safe_prompt = quote(f"{clean_ai_prompt}, classical historical oil painting, dramatic lighting, museum masterpiece, 8k")
     for attempt in range(2):
@@ -350,7 +345,6 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str, prev_images
         except Exception:
             time.sleep(3)
 
-    # LAYER 3: Broad Wikimedia Archive Fallback (Guaranteed public domain paintings)
     broad_queries = [
         "ancient history painting filetype:bitmap",
         "historical battle oil painting filetype:bitmap",
@@ -387,7 +381,6 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str, prev_images
         except Exception:
             continue
 
-    # LAYER 4: Smart Visual Remix (If internet drops, remix an existing scene image so screen is NEVER dark)
     if prev_images:
         try:
             src_img = Image.open(random.choice(prev_images)).convert("RGB")
@@ -497,7 +490,6 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     )
 
     if callout and len(callout.strip()) > 1:
-        # Replace bullets with standard hyphens and strip all emojis/special chars
         normalized = callout.replace("•", "-").replace(":", " - ").replace("'", "").replace('"', "")
         if LANGUAGE == "en":
             clean_callout = re.sub(r"[^a-zA-Z0-9\s\-\,\.\(\)]", "", normalized).strip()
@@ -572,7 +564,6 @@ def build_video(data: dict) -> None:
     srt_path = WORK / "subtitles.srt"
     create_subtitles(scenes, durs, srt_path)
 
-    # Audible Harmonic Documentary Chord Pad (A-minor ambient drone audible on phone & desktop speakers)
     log("Synthesizing harmonic documentary background score...")
     bg_music = WORK / "bg_music.mp3"
     total_dur = sum(durs)
@@ -645,3 +636,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+                
