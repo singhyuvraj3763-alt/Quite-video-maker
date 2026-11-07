@@ -232,11 +232,35 @@ def make_script(topic: str, n_scenes: int) -> dict:
             "breathing. Never mix Latin letters into 'line'.\n"
         )
         callout_rule = "short Hindi badge in Devanagari, 2-4 words, NO emojis (e.g. 'जून 1576', 'हल्दीघाटी')"
-
+    series_rules = ""
+    if TOTAL_PARTS > 1:
+        series_rules = (
+            f"SERIES: This video is PART {PART} of {TOTAL_PARTS} on the topic. "
+            "Cover ONLY this part. Do NOT cover events that belong to the other parts.\n"
+        )
+        if PART_FOCUS:
+            series_rules += f"This part covers exactly: {PART_FOCUS}\n"
+        else:
+            series_rules += (
+                f"Split the whole topic into {TOTAL_PARTS} chronological parts of similar importance "
+                f"and cover only part {PART}.\n"
+            )
+        if PART > 1:
+            series_rules += "Scene 1 beat 2 is a one-line recap of what happened in the previous part.\n"
+        if PART < TOTAL_PARTS:
+            series_rules += (
+                f"The LAST scene ends on a cliffhanger that tees off Part {PART + 1} "
+                "(this replaces the closing reflection).\n"
+            )
+        else:
+            series_rules += "This is the FINAL part: end with a conclusion about the whole story.\n"
+            series_rules += f"The title must clearly say Part {PART}.\n"
+          
     prompt = (
         "You are a master documentary storyteller writing a high-retention YouTube video.\n"
         f"Topic: {topic}\n"
         f"{lang_rules}\n"
+        f"{series_rules}"
         f"Create exactly {n_scenes} chronological scenes. Each scene has EXACTLY 3 beats.\n"
         "A beat = one narration 'line' + the 'image' that will be shown while that exact line is spoken.\n\n"
         "STORYTELLING RULES:\n"
