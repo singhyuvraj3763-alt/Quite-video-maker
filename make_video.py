@@ -1,7 +1,7 @@
 """
-Professional Cinematic Documentary Automation Pipeline (Wikipedia Infobox & Entity Matcher)
-- Direct Wikipedia Article Image Extraction: Pulls official portraits and photos for modern figures and topics.
-- Multi-Beat Dynamic Beats: Changes visual context every 2-3 seconds to match narration beats.
+Professional Cinematic Documentary Automation Pipeline (Precision Entity-Matched Visual Edition)
+- Precision Entity Search: Directly targets specific subjects like historical figures, landmarks, and corporate history.
+- Multi-Beat Dynamic Beats: Changes visual context smoothly across scenes.
 - Language-Aware Font Engine: Isolates Latin vs Devanagari fonts to prevent '▯▯▯' box bugs.
 - Zero-Dark-Screen Guarantee: Advanced multi-tone gradient fallbacks.
 """
@@ -180,13 +180,15 @@ def clean_text(t: str) -> str:
 def make_script(topic: str, n_scenes: int) -> dict:
     log(f"Generating precision-matched documentary script for: '{topic}' ({n_scenes} scenes)")
     
+    lang_name = "English" if LANGUAGE == "en" else "Hindi"
+    
     if LANGUAGE == "en":
         lang_rules = (
             "- title: Engaging English documentary title.\n"
             "- description: 2-3 sentence English summary.\n"
             "- narration: Deep documentary storytelling (26-32 words per scene). SCENE 1 MUST START WITH A QUESTION.\n"
             "- callout: Clean 2-4 word milestone badge using plain English letters and numbers, NO EMOJIS.\n"
-            "- beats: Exactly 3 specific, highly recognizable proper nouns, Wikipedia page subjects, landmarks, or corporate entities (e.g., 'Ratan Tata', 'Taj Mahal Palace Mumbai', 'Tata Nano', 'Bombay House') matching the micro-events of this scene.\n"
+            "- beats: Exactly 3 specific, highly recognizable proper nouns, landmarks, corporate entities, or historical keywords matching the exact micro-events of this scene.\n"
         )
     else:
         lang_rules = (
@@ -194,13 +196,13 @@ def make_script(topic: str, n_scenes: int) -> dict:
             "- description: 2-3 sentence Hindi summary.\n"
             "- narration: पेशेवर डॉक्यूमेंट्री शैली में गंभीर किस्सागोई (25-32 शब्द प्रति दृश्य)। पहला दृश्य सवाल से शुरू हो।\n"
             "- callout: बिना किसी इमोजी के साफ-सुथरा माइलस्टोन बैज।\n"
-            "- beats: इस दृश्य के सटीक प्रसंग से जुड़े ठीक 3 विशिष्ट अंग्रेजी कीवर्ड या विकिपीडिया शीर्षक (जैसे: 'Ratan Tata', 'Taj Hotel Mumbai', 'Tata Nano', 'Bombay House')।\n"
+            "- beats: इस दृश्य के सटीक प्रसंग से जुड़े ठीक 3 अंग्रेजी कीवर्ड या नाम (जैसे: 'Ratan Tata', 'Taj Hotel Mumbai', 'Tata Nano', 'Bombay House').\n"
         )
 
     prompt = (
         f"You are a master historical documentary filmmaker creating a high-retention video like IRON AND INK.\n"
         f"Exact Topic / Subject: {topic}\n"
-        f"Language: {'English' / if LANGUAGE == 'en' else 'Hindi'}\n"
+        f"Language: {lang_name}\n"
         f"Create exactly {n_scenes} chronological scenes covering this subject.\n"
         f"{lang_rules}\n"
         "Return pure JSON:\n"
@@ -235,8 +237,8 @@ def make_script(topic: str, n_scenes: int) -> dict:
         "title": clean_text(data.get("title", topic)),
         "description": clean_text(data.get("description", "")),
         "scenes": scenes,
-    }
-    # ==================== Wikipedia Infobox & Entity-Matched Visual Engine ====================
+                    }
+    # ==================== Precision Entity-Matched Visual Engine ====================
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -266,46 +268,13 @@ def create_cinematic_gradient(path: Path, seed: int) -> None:
             px[x, y] = (max(0, min(255, r + noise)), max(0, min(255, g + noise)), max(0, min(255, b + noise)))
     base.save(path, quality=92)
 
-def fetch_wiki_infobox_image(title: str) -> str:
-    """Queries official Wikipedia REST API to pull the main article infobox photograph."""
-    try:
-        clean_title = title.replace(" ", "_")
-        url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(clean_title)}"
-        headers = {"User-Agent": "HistoricalDocumentaryPipeline/5.0 (Contact: github@actions.com)"}
-        r = requests.get(url, headers=headers, timeout=6)
-        if r.status_code == 200:
-            data = r.json()
-            if "originalimage" in data and data["originalimage"].get("source"):
-                return data["originalimage"]["source"]
-            elif "thumbnail" in data and data["thumbnail"].get("source"):
-                return data["thumbnail"]["source"]
-    except Exception:
-        pass
-    return ""
-
-def fetch_image_smart(query_text: str, path: Path, seed: int, topic: str, prev_images: list) -> bool:
+def fetch_image_precision(query_text: str, path: Path, seed: int, topic: str, prev_images: list) -> bool:
     wiki_headers = {
-        "User-Agent": "HistoricalDocumentaryPipeline/5.0 (Contact: github@actions.com) PythonRequests/2.31"
+        "User-Agent": "HistoricalDocumentaryPipeline/4.0 (Contact: github@actions.com) PythonRequests/2.31"
     }
     
-    # STEP 1: Try fetching the official Wikipedia article summary image for the specific beat or main topic
-    for target in [query_text, topic]:
-        if target:
-            wiki_img_url = fetch_wiki_infobox_image(target)
-            if wiki_img_url and wiki_img_url not in _used_urls:
-                try:
-                    img_resp = requests.get(wiki_img_url, headers=wiki_headers, timeout=8)
-                    if img_resp.status_code == 200 and len(img_resp.content) > 10000:
-                        img = Image.open(io.BytesIO(img_resp.content)).convert("RGB")
-                        if img.width >= 300 and img.height >= 200:
-                            _used_urls.add(wiki_img_url)
-                            fit_cover(img).save(path, quality=94)
-                            return True
-                except Exception:
-                    pass
-
-    # STEP 2: Try Wikimedia Commons search with precise entity terms
     clean_q = re.sub(r"[^a-zA-Z0-9\s]", "", query_text).strip()
+    
     search_queries = [
         clean_q,
         f"{clean_q} photography",
@@ -427,5 +396,174 @@ def render_multi_beat_clip(scene_data: dict, aud_path: Path, clip_path: Path, sc
         b_img = WORK / f"scene_{scene_idx:03d}_beat_{b_idx}.jpg"
         if not (b_img.exists() and b_img.stat().st_size > 10000):
             log(f"  Fetching Scene {scene_idx + 1} Beat {b_idx + 1}/3 for entity: '{beat_prompt}'")
-            fetch_image_smart(beat_prompt, b_img, seed
-                                   
+            fetch_image_precision(beat_prompt, b_img, seed=6000 + (scene_idx * 50) + b_idx, topic=topic, prev_images=valid_prev)
+            if b_img.exists() and b_img.stat().st_size > 10000:
+                valid_prev.append(b_img)
+        
+        sub_tmp = WORK / f"sub_{scene_idx}_{b_idx}.mp4"
+        frames = int(beat_dur * FPS)
+        cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+        z = f"1+0.08*on/{frames}" if b_idx % 2 == 0 else f"1.08-0.08*on/{frames}"
+        
+        vf = (
+            f"crop=iw:ih-45:0:0,"
+            f"scale=3840:2160:flags=lanczos,"
+            f"zoompan=z='{z}':x='{cx}':y='{cy}':d={frames}:s={W}x{H}:fps={FPS},format=yuv420p"
+        )
+        
+        if b_idx == 0 and scene_data.get("callout"):
+            callout = scene_data["callout"]
+            normalized = callout.replace("•", "-").replace(":", " - ").replace("'", "").replace('"', "")
+            if LANGUAGE == "en":
+                clean_callout = re.sub(r"[^a-zA-Z0-9\s\-\,\.\(\)]", "", normalized).strip()
+            else:
+                clean_callout = re.sub(r"[^\w\s\d\-\,\.\(\)\u0900-\u097F]", "", normalized).strip()
+            clean_callout = re.sub(r"\s+", " ", clean_callout)
+            
+            if len(clean_callout) > 1:
+                badge_dur = min(3.0, beat_dur * 0.8)
+                box_w = max(240, min(880, len(clean_callout) * 14 + 55))
+                font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else f"font='{DEFAULT_FONT}'"
+                vf += (
+                    f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.85:t=fill:enable='between(t,0.2,{badge_dur})'"
+                    f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.2,{badge_dur})'"
+                    f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=23:x=105:y=98:"
+                    f"{font_opt}:enable='between(t,0.2,{badge_dur})'"
+                )
+
+        subprocess.run([
+            "ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-i", str(b_img),
+            "-vf", vf, "-t", f"{beat_dur:.3f}", "-r", str(FPS),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", str(sub_tmp)
+        ], check=True)
+        beat_clips.append(sub_tmp)
+
+    beat_list = WORK / f"beats_{scene_idx}.txt"
+    beat_list.write_text("".join(f"file '{bc.resolve()}'\n" for bc in beat_clips))
+    
+    scene_video_only = WORK / f"scene_video_{scene_idx}.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+        "-i", str(beat_list), "-c", "copy", str(scene_video_only)
+    ], check=True)
+
+    tmp_clip = clip_path.with_name(clip_path.stem + ".tmp.mp4")
+    subprocess.run([
+        "ffmpeg", "-y", "-loglevel", "error", "-i", str(scene_video_only), "-i", str(aud_path),
+        "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+        "-shortest", str(tmp_clip)
+    ], check=True)
+    os.replace(tmp_clip, clip_path)
+
+def build_video(data: dict) -> None:
+    WORK.mkdir(exist_ok=True)
+    OUT.mkdir(exist_ok=True)
+    scenes = data["scenes"]
+    topic = data.get("topic", "History")
+    n = len(scenes)
+
+    log("=== Step 1/2: Recording Documentary Narration ===")
+    auds, durs = [], []
+    for i, sc in enumerate(scenes):
+        aud = WORK / f"aud_{i:03d}.mp3"
+        if not (aud.exists() and aud.stat().st_size > 1000 and audio_duration(aud) > 0.8):
+            log(f"Recording Scene {i + 1}/{n}...")
+            speak(sc["narration"], aud)
+        auds.append(aud)
+        durs.append(audio_duration(aud) + 0.4)
+
+    log("=== Step 2/2: Generating Precision Entity Visuals & Rendering ===")
+    clips = []
+    valid_prev = []
+    for i in range(n):
+        clip = WORK / f"clip_{i:03d}.mp4"
+        if not (clip.exists() and clip.stat().st_size > 1000):
+            log(f"Processing Scene {i + 1}/{n}...")
+            render_multi_beat_clip(scenes[i], auds[i], clip, i, durs[i], topic, valid_prev)
+        clips.append(clip)
+
+    listfile = WORK / "list.txt"
+    listfile.write_text("".join(f"file '{c.resolve()}'\n" for c in clips))
+
+    raw_concat = WORK / "concat_raw.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+         "-i", str(listfile), "-c", "copy", str(raw_concat)],
+        check=True
+    )
+
+    srt_path = WORK / "subtitles.srt"
+    create_subtitles(scenes, durs, srt_path)
+
+    log("Synthesizing harmonic documentary background score...")
+    bg_music = WORK / "bg_music.mp3"
+    total_dur = sum(durs)
+    expr = (
+        "(sin(110*2*PI*t)*0.35 + sin(164.81*2*PI*t)*0.25 + "
+        "sin(220*2*PI*t)*0.20 + sin(261.63*2*PI*t)*0.15) * (0.75 + 0.25*sin(0.25*2*PI*t))"
+    )
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi",
+        "-i", f"aevalsrc='{expr}':s=44100:d={total_dur}",
+        "-af", "lowpass=f=900,volume=0.14",
+        str(bg_music)
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    video_with_audio = WORK / "video_with_audio.mp4"
+    if bg_music.exists() and bg_music.stat().st_size > 1000:
+        subprocess.run([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(raw_concat), "-i", str(bg_music),
+            "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:weights=1 0.14[a]",
+            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", str(video_with_audio)
+        ], check=True)
+    else:
+        video_with_audio = raw_concat
+
+    final = OUT / "final.mp4"
+    sub_font = "Noto Sans Devanagari" if LANGUAGE == "hi" else "DejaVu Sans"
+    subtitle_filter = (
+        f"subtitles='{srt_path.resolve()}':force_style="
+        f"'FontName={sub_font},FontSize=22,PrimaryColour=&H0000FFFF,"
+        "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=55,Alignment=2'"
+    )
+
+    log("Burning in clean documentary subtitles...")
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video_with_audio),
+         "-vf", subtitle_filter, "-c:v", "libx264", "-crf", "22", "-preset", "veryfast",
+         "-c:a", "copy", "-movflags", "+faststart", str(final)],
+        check=True
+    )
+    log(f"COMPLETED! Final video saved to {final}")
+
+# ==================== Main Runner ====================
+def main() -> None:
+    mode = sys.argv[1] if len(sys.argv) > 1 else "full"
+    topic = os.environ.get("TOPIC", "The Rise and Fall of the Roman Empire").strip()
+    n = int(os.environ.get("SCENES", "24") or 24)
+
+    if mode == "full" and os.environ.get("RESUME") != "1":
+        for p in [WORK, OUT]:
+            if p.exists():
+                import shutil
+                shutil.rmtree(p)
+        WORK.mkdir(exist_ok=True)
+        OUT.mkdir(exist_ok=True)
+
+    if mode in ("full", "script"):
+        data = make_script(topic, n)
+        Path("script.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        if mode == "script":
+            return
+    else:
+        p = Path("script.json")
+        if not p.exists():
+            fatal("script.json not found.")
+        data = json.loads(p.read_text(encoding="utf-8"))
+
+    build_video(data)
+
+if __name__ == "__main__":
+    main()
+    
