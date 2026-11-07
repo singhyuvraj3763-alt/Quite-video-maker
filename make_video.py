@@ -1,5 +1,5 @@
 """
-Cinematic Documentary Pipeline v5.1 (Voice-Synced, AI-Image Edition, black-frame proof)
+Cinematic Documentary Pipeline v5.2 (Voice-Synced, AI-Image Edition, black-frame proof)
 
 What changed vs v4:
 - Every narration LINE gets its own AI-generated image, and the scene for that image
@@ -365,15 +365,20 @@ def _throttle() -> None:
 def generate_image(visual: str, path: Path, seed: int) -> bool:
     """Try hard. Returns True only if a real, non-black, non-duplicate image was saved."""
     full_prompt = f"{visual}, {STYLE}"[:450]
-    url = f"https://image.pollinations.ai/prompt/{quote(full_prompt)}"
-    headers = {"User-Agent": "DocumentaryPipeline/5.1"}
+    headers = {"User-Agent": "DocumentaryPipeline/5.2"}
     if POLLINATIONS_TOKEN:
+        # current Pollinations API: needs the key, uses free hourly pollen balance
+        url = f"https://gen.pollinations.ai/image/{quote(full_prompt, safe='')}"
+        model = POLL_MODEL or "flux"
         headers["Authorization"] = f"Bearer {POLLINATIONS_TOKEN}"
+    else:
+        url = f"https://image.pollinations.ai/prompt/{quote(full_prompt, safe='')}"
+        model = POLL_MODEL
 
     for attempt in range(IMG_TRIES):
         params = {"width": W, "height": H, "seed": seed + attempt * 101, "nologo": "true"}
-        if POLL_MODEL:
-            params["model"] = POLL_MODEL
+        if model:
+            params["model"] = model
         _throttle()
         status = None
         try:
@@ -396,9 +401,19 @@ def generate_image(visual: str, path: Path, seed: int) -> bool:
                     return True
         except Exception as e:
             log(f"    request error: {type(e).__name__}: {e}")
-        # back off: longer each time, much longer if we were rate-limited
-        base = 60 if status == 429 else 25
-        wait = min(240, base * (attempt + 1))
+
+        if status == 402 and not POLLINATIONS_TOKEN:
+            fatal("Pollinations returned 402: anonymous image generation is no longer available. "
+                  "Add your API key as secret POLLINATIONS_TOKEN and pass it in the workflow env.")
+        if status in (401, 403) and POLLINATIONS_TOKEN:
+            fatal(f"Pollinations rejected the API key (status {status}). Check the secret value "
+                  "(use the sk_ key from enter.pollinations.ai).")
+
+        if status == 402:
+            wait = 300  # out of free pollen for now; the balance refills every hour
+        else:
+            base = 60 if status == 429 else 25
+            wait = min(240, base * (attempt + 1))
         log(f"    attempt {attempt + 1}/{IMG_TRIES} failed (status {status}); waiting {wait}s")
         time.sleep(wait)
     return False
@@ -416,7 +431,7 @@ def borrow_neighbor(idx: int, paths: list, good: list) -> bool:
         except Exception:
             continue
     return False
-    # ==================== Voiceover Engine ====================
+  # ==================== Voiceover Engine ====================
 async def _edge(text: str, path: Path) -> None:
     import edge_tts
     communicate = edge_tts.Communicate(text, VOICE, rate=VOICE_RATE, pitch=VOICE_PITCH)
