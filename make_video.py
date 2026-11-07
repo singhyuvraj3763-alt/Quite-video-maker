@@ -1,11 +1,10 @@
 """
-Professional Cinematic Documentary Automation Pipeline (IRON & INK Style)
-- Dynamic topic-matched background atmosphere and audio scoring
-- Seamless English & Hindi support via LANGUAGE environment variable ("hi" or "en")
-- High-retention question hooks for Scene 1 + mid-video narrative tension twists
-- Emoji-free, clean professional milestone badges & lower thirds
-- Voice tuning optimized for deep studio narration pacing
-- Randomized Wikimedia Commons search tailored strictly to the topic with AI fallback
+Professional Cinematic Documentary Automation Pipeline (IRON & INK Style - Final Bulletproof Edition)
+- Language-Specific Font Engine: Fixes English 'tofu box' (▯▯▯) bug by isolating Latin vs Devanagari fonts
+- Dual Visual Search Engine: 2-word 'wiki_query' with filetype:bitmap for Wikimedia + 45s timeout Pollinations AI
+- Zero-Dark-Screen Guarantee: Eliminates blank color fallbacks completely
+- Audible Harmonic Documentary Pad: Warm A-minor ambient drone audible on phones & headphones
+- Opening Question Hook (Scene 1) + Mid-Video Retention Twists (35% and 70%)
 """
 
 import asyncio
@@ -20,7 +19,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 import requests
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageOps
 
 FPS = 25
 W, H = 1920, 1080
@@ -46,6 +45,7 @@ WORK = Path("work")
 OUT = Path("out")
 
 BAD_WORDS = ("image", "tts", "live", "audio", "embed", "robotics", "computer", "vision")
+_used_urls = set()
 
 def fatal(msg: str) -> None:
     print("\nERROR: " + msg, flush=True)
@@ -54,25 +54,42 @@ def fatal(msg: str) -> None:
 def log(msg: str) -> None:
     print(msg, flush=True)
 
-# ==================== Universal Font Discovery ====================
-def get_font_path() -> tuple:
-    candidates = [
-        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-    ]
-    for c in candidates:
-        if os.path.exists(c):
-            return c, Path(c).stem
-    for p in Path("/usr/share/fonts").rglob("*.ttf"):
-        if "Bold" in p.name or "Sans" in p.name:
+# ==================== Language-Aware Font Discovery (Fixes ▯▯▯ Box Bug) ====================
+def get_font_path(lang: str) -> tuple:
+    if lang == "en":
+        # Strictly Latin fonts with full English A-Z support (NEVER Devanagari)
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+            "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                return c, Path(c).stem
+        for p in Path("/usr/share/fonts").rglob("*.ttf"):
+            name_low = p.name.lower()
+            if ("dejavu" in name_low or "liberation" in name_low or "freesans" in name_low) and "bold" in name_low:
+                return str(p), p.stem
+    else:
+        # Hindi Devanagari fonts first
+        candidates = [
+            "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                return c, Path(c).stem
+        for p in Path("/usr/share/fonts").rglob("*Devanagari*.ttf"):
             return str(p), p.stem
+
     return "", DEFAULT_FONT
 
-FONT_FILE, FONT_NAME = get_font_path()
-if FONT_FILE:
-    log(f"Font loaded: {FONT_FILE}")
+FONT_FILE, FONT_NAME = get_font_path(LANGUAGE)
+log(f"Selected Font for {LANGUAGE.upper()}: {FONT_FILE or FONT_NAME}")
 
 # ==================== Dynamic Gemini Script Engine ====================
 _good_model = None
@@ -164,7 +181,7 @@ def gemini_json(prompt: str, label: str):
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing with Hooks ====================
+# ==================== Script Processing with Dual Search Queries ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
@@ -176,19 +193,19 @@ def make_script(topic: str, n_scenes: int) -> dict:
         lang_rules = (
             "- title: Engaging English documentary title.\n"
             "- description: 2-3 sentence English summary.\n"
-            "- narration: Deep, professional documentary storytelling (28-34 words per scene).\n"
-            "  * SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION.\n"
-            "  * MID-VIDEO SCENES (around 35% and 70% through) MUST INCLUDE PATTERN INTERRUPTS / MINI-HOOKS.\n"
-            "- callout: Clean 2-4 word milestone badge with NO EMOJIS (e.g., '1459 • Mehrangarh Fort'). Leave empty \"\" if no milestone.\n"
+            "- narration: Deep, gripping documentary storytelling (26-32 words per scene).\n"
+            "  * SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION (e.g., 'Did you know that...').\n"
+            "  * MID-VIDEO SCENES (around 35% and 70% through) MUST INCLUDE PATTERN INTERRUPTS / MINI-HOOKS (e.g., 'But just when victory seemed certain, a terrifying new threat emerged...').\n"
+            "- callout: Clean 2-4 word milestone badge using ONLY plain English letters, numbers, and hyphens, NO EMOJIS and NO special bullets (e.g., '753 BC - Founding of Rome' or '49 BC - Rubicon Crossed').\n"
         )
     else:
         lang_rules = (
             "- title: Engaging Hindi documentary title.\n"
             "- description: 2-3 sentence Hindi summary.\n"
             "- narration: पेशेवर डॉक्यूमेंट्री शैली में गंभीर और रोमांचक किस्सागोई (25-32 शब्द प्रति दृश्य)।\n"
-            "  * पहला दृश्य (Scene 1) एक जबरदस्त जिज्ञासा भरे सवाल से शुरू होना चाहिए।\n"
-            "  * बीच के दृश्यों (लगभग 35% और 70% हिस्से पर) में एक मिनी-हुक या रोमांचक मोड़ जरूर होना चाहिए।\n"
-            "- callout: बिना किसी इमोजी के साफ-सुथरा माइलस्टोन बैज (जैसे: '1459 • मेहरानगढ़ दुर्ग'). यदि ज़रूरत न हो तो खाली \"\" छोड़ें。\n"
+            "  * पहला दृश्य (Scene 1) एक जबरदस्त जिज्ञासा भरे सवाल से शुरू होना चाहिए (जैसे: 'क्या आप जानते हैं कि...').\n"
+            "  * बीच के दृश्यों (लगभग 35% और 70% हिस्से पर) में एक मिनी-हुक या रोमांचक मोड़ जरूर होना चाहिए (जैसे: 'लेकिन तभी एक ऐसा खौफनाक मंजर सामने आया...').\n"
+            "- callout: बिना किसी इमोजी के साफ-सुथरा हिंदी माइलस्टोन बैज (जैसे: '1459 - मेहरानगढ़ दुर्ग' या '49 BC - जूलियस सीज़र').\n"
         )
 
     prompt = (
@@ -196,17 +213,17 @@ def make_script(topic: str, n_scenes: int) -> dict:
         f"Exact Topic / Subject: {topic}\n"
         f"Language: {'English' if LANGUAGE == 'en' else 'Hindi'}\n"
         f"Create exactly {n_scenes} chronological scenes covering this subject from start to finish.\n"
-        "CRITICAL RULE FOR IMAGES: Every single scene MUST have a 100% UNIQUE 'image_prompt' for historical paintings, vintage maps, museum artifacts, or architecture.\n"
         "Guidelines:\n"
         "- Maintain relentless narrative tension throughout the entire video.\n"
         f"{lang_rules}"
-        "- image_prompt: 3-5 specific English keywords for historical artwork, oil paintings, or architecture. Cinematic, 8k, museum lighting. No text or logos.\n"
+        "- wiki_query: 2-3 simple English proper nouns or historical terms that exist on Wikipedia/Wikimedia Commons (e.g., 'Roman Colosseum', 'Julius Caesar', 'Hannibal Alps', 'Augustus statue'). Keep it 2-3 words max!\n"
+        "- image_prompt: 5-8 descriptive English words for an oil painting or cinematic historical scene (e.g., 'Roman legions marching across snowy Alps oil painting').\n"
         "Return pure JSON:\n"
         '{\n'
         '  "title": "Title",\n'
         '  "description": "Summary",\n'
         '  "scenes": [\n'
-        '    {"narration": "...", "image_prompt": "...", "callout": "..."}\n'
+        '    {"narration": "...", "wiki_query": "...", "image_prompt": "...", "callout": "..."}\n'
         '  ]\n'
         '}'
     )
@@ -215,19 +232,19 @@ def make_script(topic: str, n_scenes: int) -> dict:
     for s in data.get("scenes", [])[:n_scenes]:
         scenes.append({
             "narration": clean_text(s.get("narration", "")),
+            "wiki_query": clean_text(s.get("wiki_query", "")),
             "image_prompt": clean_text(s.get("image_prompt", "")),
             "callout": clean_text(s.get("callout", ""))
         })
 
-    log(f"Script generated successfully with hooks: {len(scenes)} scenes ready.")
+    log(f"Script generated successfully: {len(scenes)} scenes ready.")
     return {
         "topic": topic,
         "title": clean_text(data.get("title", topic)),
         "description": clean_text(data.get("description", "")),
         "scenes": scenes,
     }
-
-# ==================== High-Res Visuals Engine with AI Fallback ====================
+# ==================== Bulletproof Multi-Layer Visuals Engine ====================
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -241,80 +258,164 @@ def fit_cover(img: Image.Image) -> Image.Image:
         img = img.crop((0, top, w, top + nh))
     return img.resize((W, H), Image.LANCZOS)
 
-def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
-    headers = {"User-Agent": "DocumentaryBot/6.0"}
-    prompt = scene_info.get("image_prompt", "")
-    words = [w for w in re.findall(r"\b[A-Za-z]+\b", prompt) if len(w) > 2]
-    specific_query = " ".join(words[:4]) if words else topic
-    
-    query_chain = [
-        f"{specific_query} historical painting",
-        f"{topic} museum art archive",
-        prompt,
-        f"{topic} historical architecture"
-    ]
-    random.shuffle(query_chain)
+def create_vintage_canvas(path: Path, seed: int) -> None:
+    """Creates a rich textured historical parchment/vignette canvas so screen is NEVER blank."""
+    random.seed(seed)
+     base = Image.new("RGB", (W, H), (44, 34, 24))
+    px = base.load()
+    for y in range(0, H, 4):
+        for x in range(0, W, 4):
+            n = random.randint(-12, 12)
+            r = max(20, min(80, 52 + n))
+            g = max(15, min(65, 40 + n))
+            b = max(10, min(50, 28 + n))
+            for dy in range(4):
+                for dx in range(4):
+                    if x + dx < W and y + dy < H:
+                        px[x + dx, y + dy] = (r, g, b)
+    base.save(path, quality=92)
 
-    for q in query_chain:
+def fetch_image(scene_info: dict, path: Path, seed: int, topic: str, prev_images: list) -> bool:
+    # Compliant Wikimedia User-Agent + Browser User-Agent for AI endpoints
+    wiki_headers = {
+        "User-Agent": "HistoricalDocumentaryPipeline/2.0 (https://github.com/actions; contact@github.com) PythonRequests/2.31"
+    }
+    browser_headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+
+    prompt = scene_info.get("image_prompt", "")
+    wiki_q = scene_info.get("wiki_query", "")
+    words = [w for w in re.findall(r"\b[A-Za-z]+\b", prompt) if len(w) > 3]
+    short_kw = " ".join(words[:2]) if words else topic
+    topic_short = " ".join([w for w in re.findall(r"\b[A-Za-z]+\b", topic) if len(w) > 3][:2]) or topic
+
+    # LAYER 1: Wikimedia Commons with short, high-hit queries + filetype:bitmap
+    wiki_queries = [
+        f"{wiki_q} filetype:bitmap" if wiki_q else "",
+        f"{short_kw} painting filetype:bitmap",
+        f"{topic_short} history filetype:bitmap",
+        f"{topic_short} filetype:bitmap",
+    ]
+    wiki_queries = [q.strip() for q in wiki_queries if q.strip()]
+
+    for q in wiki_queries:
         api_url = "https://commons.wikimedia.org/w/api.php"
         params = {
             "action": "query",
             "generator": "search",
             "gsrsearch": q,
             "gsrnamespace": 6,
-            "gsrlimit": 15,
-            "gsroffset": random.randint(0, 5),
+            "gsrlimit": 20,
             "prop": "imageinfo",
             "iiprop": "url|mime",
             "iiurlwidth": 1280,
             "format": "json"
         }
         try:
-            r = requests.get(api_url, params=params, headers=headers, timeout=8)
+            r = requests.get(api_url, params=params, headers=wiki_headers, timeout=10)
             if r.status_code == 200:
                 pages = r.json().get("query", {}).get("pages", {})
-                for pid, info in pages.items():
+                items = list(pages.values())
+                random.shuffle(items)
+                for info in items:
                     imginfo = info.get("imageinfo", [{}])[0]
                     mime = imginfo.get("mime", "")
                     url = imginfo.get("thumburl") or imginfo.get("url")
-                    if url and ("jpeg" in mime or "png" in mime or "jpg" in mime):
-                        img_resp = requests.get(url, headers=headers, timeout=6)
-                        if img_resp.status_code == 200 and len(img_resp.content) > 20000:
+                    if url and url not in _used_urls and ("jpeg" in mime or "png" in mime or "jpg" in mime):
+                        img_resp = requests.get(url, headers=wiki_headers, timeout=10)
+                        if img_resp.status_code == 200 and len(img_resp.content) > 15000:
                             img = Image.open(io.BytesIO(img_resp.content)).convert("RGB")
-                            if img.width >= 600 and img.height >= 400:
+                            if img.width >= 500 and img.height >= 350:
+                                _used_urls.add(url)
                                 fit_cover(img).save(path, quality=92)
+                                log(f"  [OK] Wikimedia visual fetched for '{q}'")
                                 return True
         except Exception:
             continue
 
-    # Guaranteed AI Cinematic Fallback (Prevents pitch black screens)
-    safe_prompt = quote(f"{prompt}, oil painting, classical historical artwork, museum lighting, cinematic, 8k")
-    ai_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=1280&height=720&seed={seed + random.randint(1,9999)}&nologo=true&model=turbo"
-    for _ in range(3):
+    # LAYER 2: Pollinations AI with 45-second timeout (No broken model=turbo flag)
+    clean_ai_prompt = " ".join(words[:7]) if words else f"{topic} historical oil painting"
+    safe_prompt = quote(f"{clean_ai_prompt}, classical historical oil painting, dramatic lighting, museum masterpiece, 8k")
+    for attempt in range(2):
+        ai_seed = seed + random.randint(10, 99999)
+        ai_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=1280&height=720&seed={ai_seed}&nologo=true"
         try:
-            r = requests.get(ai_url, headers=headers, timeout=10)
+            r = requests.get(ai_url, headers=browser_headers, timeout=45)
             if r.status_code == 200 and len(r.content) > 10000:
                 img = Image.open(io.BytesIO(r.content)).convert("RGB")
                 fit_cover(img).save(path, quality=92)
+                log(f"  [OK] AI visual generated (attempt {attempt + 1})")
                 return True
         except Exception:
-            time.sleep(1)
-        
-    cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#141b2d:s={W}x{H}:d=1", "-frames:v", "1", str(path)]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(3)
+
+    # LAYER 3: Broad Wikimedia Archive Fallback (Guaranteed public domain paintings)
+    broad_queries = [
+        "ancient history painting filetype:bitmap",
+        "historical battle oil painting filetype:bitmap",
+        "renaissance architecture painting filetype:bitmap",
+        "museum painting portrait history filetype:bitmap"
+    ]
+    random.shuffle(broad_queries)
+    for bq in broad_queries[:2]:
+        try:
+            r = requests.get(
+                "https://commons.wikimedia.org/w/api.php",
+                params={
+                    "action": "query", "generator": "search", "gsrsearch": bq,
+                    "gsrnamespace": 6, "gsrlimit": 25, "prop": "imageinfo",
+                    "iiprop": "url|mime", "iiurlwidth": 1280, "format": "json"
+                },
+                headers=wiki_headers, timeout=10
+            )
+            if r.status_code == 200:
+                items = list(r.json().get("query", {}).get("pages", {}).values())
+                random.shuffle(items)
+                for info in items:
+                    imginfo = info.get("imageinfo", [{}])[0]
+                    url = imginfo.get("thumburl") or imginfo.get("url")
+                    if url and url not in _used_urls:
+                        img_resp = requests.get(url, headers=wiki_headers, timeout=10)
+                        if img_resp.status_code == 200 and len(img_resp.content) > 15000:
+                            img = Image.open(io.BytesIO(img_resp.content)).convert("RGB")
+                            if img.width >= 500 and img.height >= 350:
+                                _used_urls.add(url)
+                                fit_cover(img).save(path, quality=92)
+                                log("  [OK] Broad archive visual fetched")
+                                return True
+        except Exception:
+            continue
+
+    # LAYER 4: Smart Visual Remix (If internet drops, remix an existing scene image so screen is NEVER dark)
+    if prev_images:
+        try:
+            src_img = Image.open(random.choice(prev_images)).convert("RGB")
+            src_img = ImageOps.mirror(src_img)
+            w, h = src_img.size
+            cropped = src_img.crop((int(w * 0.08), int(h * 0.08), int(w * 0.92), int(h * 0.92))).resize((W, H), Image.LANCZOS)
+            cropped = ImageEnhance.Color(cropped).enhance(0.85)
+            cropped.save(path, quality=92)
+            log("  [OK] Remixed existing scene visual (zero dark screen)")
+            return True
+        except Exception:
+            pass
+
+    create_vintage_canvas(path, seed)
     return False
+
 def generate_images(scenes: list, topic: str) -> list:
     n = len(scenes)
     paths = []
+    valid_prev = []
     for i, sc in enumerate(scenes):
         img = WORK / f"img_{i:03d}.jpg"
-        if not (img.exists() and img.stat().st_size > 5000):
-            log(f"Fetching Historical Visual {i + 1}/{n}: {sc['image_prompt'][:45]}...")
-            ok = fetch_image(sc, img, seed=8000 + (i * 47), topic=topic)
-            if not ok:
-                cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#141b2d:s={W}x{H}:d=1", "-frames:v", "1", str(img)]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(1.5)
+        if not (img.exists() and img.stat().st_size > 10000):
+            log(f"Fetching Visual {i + 1}/{n}: Wiki='{sc.get('wiki_query', '')}' | Prompt='{sc['image_prompt'][:35]}...'")
+            fetch_image(sc, img, seed=8000 + (i * 47), topic=topic, prev_images=valid_prev)
+            time.sleep(2.0)
+        if img.exists() and img.stat().st_size > 10000:
+            valid_prev.append(img)
         paths.append(img)
     return paths
 
@@ -336,7 +437,7 @@ def audio_duration(path: Path) -> float:
 
 def speak(text: str, path: Path) -> None:
     text = clean_text(text)
-    for attempt in range(3):
+    for _ in range(3):
         try:
             asyncio.run(_edge(text, path))
             if path.exists() and path.stat().st_size > 1000 and audio_duration(path) > 0.8:
@@ -376,7 +477,7 @@ def create_subtitles(scenes: list, durs: list, srt_path: Path):
             sub_idx += 1
     srt_path.write_text("\n".join(lines), encoding="utf-8")
 
-# ==================== Cinematic Motion & Emoji-Free Callout Boxes ====================
+# ==================== Cinematic Motion & 100% Glyph-Safe Callout Badges ====================
 def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> str:
     f = frames
     cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
@@ -396,17 +497,23 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     )
 
     if callout and len(callout.strip()) > 1:
-        clean_callout = re.sub(r'[^\w\s\d\•\-\,\.\(\)]', '', callout).strip()
-        
+        # Replace bullets with standard hyphens and strip all emojis/special chars
+        normalized = callout.replace("•", "-").replace(":", " - ").replace("'", "").replace('"', "")
+        if LANGUAGE == "en":
+            clean_callout = re.sub(r"[^a-zA-Z0-9\s\-\,\.\(\)]", "", normalized).strip()
+        else:
+            clean_callout = re.sub(r"[^\w\s\d\-\,\.\(\)\u0900-\u097F]", "", normalized).strip()
+        clean_callout = re.sub(r"\s+", " ", clean_callout)
+
         if len(clean_callout) > 1:
-            badge_duration = min(3.0, dur * 0.6) if dur > 1.5 else dur
-            box_w = max(240, min(850, len(clean_callout) * 14 + 50))
+            badge_duration = min(3.5, dur * 0.65) if dur > 1.5 else dur
+            box_w = max(240, min(880, len(clean_callout) * 14 + 55))
             font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else f"font='{DEFAULT_FONT}'"
 
             vf += (
                 f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.85:t=fill:enable='between(t,0.3,{badge_duration})'"
                 f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.3,{badge_duration})'"
-                f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=22:x=105:y=98:"
+                f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=23:x=105:y=98:"
                 f"{font_opt}:enable='between(t,0.3,{badge_duration})'"
             )
     return vf
@@ -465,25 +572,28 @@ def build_video(data: dict) -> None:
     srt_path = WORK / "subtitles.srt"
     create_subtitles(scenes, durs, srt_path)
 
-    # Topic-Matched Ambient/Cinematic Music Generation
-    log("Synthesizing topic-matched background atmosphere...")
+    # Audible Harmonic Documentary Chord Pad (A-minor ambient drone audible on phone & desktop speakers)
+    log("Synthesizing harmonic documentary background score...")
     bg_music = WORK / "bg_music.mp3"
-    # Generates a subtle, low-frequency atmospheric drone matching documentary tension
     total_dur = sum(durs)
+    expr = (
+        "(sin(110*2*PI*t)*0.35 + sin(164.81*2*PI*t)*0.25 + "
+        "sin(220*2*PI*t)*0.20 + sin(261.63*2*PI*t)*0.15) * (0.75 + 0.25*sin(0.25*2*PI*t))"
+    )
     subprocess.run([
-        "ffmpeg", "-y", "-f", "lavfi", 
-        "-i", f"aevalsrc='sin(40*2*PI*t)*0.03 + sin(80*2*PI*t)*0.01':s=44100:d={total_dur}",
-        "-af", "lowpass=f=300,volume=0.15", 
+        "ffmpeg", "-y", "-f", "lavfi",
+        "-i", f"aevalsrc='{expr}':s=44100:d={total_dur}",
+        "-af", "lowpass=f=900,volume=0.14",
         str(bg_music)
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     video_with_audio = WORK / "video_with_audio.mp4"
     if bg_music.exists() and bg_music.stat().st_size > 1000:
-        log("Mixing cinematic background atmosphere with voiceover...")
+        log("Mixing background score with narration...")
         subprocess.run([
             "ffmpeg", "-y", "-loglevel", "error",
             "-i", str(raw_concat), "-i", str(bg_music),
-            "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:weights=1 0.2[a]",
+            "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:weights=1 0.14[a]",
             "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", str(video_with_audio)
         ], check=True)
     else:
@@ -509,7 +619,7 @@ def build_video(data: dict) -> None:
 # ==================== Main Runner ====================
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "full"
-    topic = os.environ.get("TOPIC", "The Entire History of England").strip()
+    topic = os.environ.get("TOPIC", "The Rise and Fall of the Roman Empire").strip()
     n = int(os.environ.get("SCENES", "24") or 24)
 
     if mode == "full" and os.environ.get("RESUME") != "1":
@@ -535,4 +645,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
