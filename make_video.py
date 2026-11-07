@@ -68,7 +68,10 @@ POLL_MODEL = os.environ.get("POLL_MODEL", "").strip()
 IMG_GAP = float(os.environ.get("IMG_GAP", "3" if POLLINATIONS_TOKEN else "20"))  # seconds between requests
 IMG_TRIES = int(os.environ.get("IMG_TRIES", "8"))        # attempts per image per round
 REPAIR_ROUNDS = int(os.environ.get("REPAIR_ROUNDS", "4"))  # extra rounds for images that still failed
-
+# Series support: same TOPIC for every part, only these three change
+PART = int(os.environ.get("PART", "1") or 1)
+TOTAL_PARTS = int(os.environ.get("TOTAL_PARTS", "1") or 1)
+PART_FOCUS = os.environ.get("PART_FOCUS", "").strip()
 WORK = Path("work")
 OUT = Path("out")
 
