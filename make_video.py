@@ -1,11 +1,11 @@
 """
-Professional Bilingual (Hindi & English) Documentary Automation Pipeline
+Professional Cinematic Documentary Automation Pipeline (IRON & INK Style)
 - Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
 - Seamless English & Hindi support via LANGUAGE environment variable ("hi" or "en")
-- Fully dynamic topic handling (no forced defaults)
-- Voice tuning: SwaraNeural with +14% rate and +1Hz pitch
-- Randomized Wikimedia Commons search tailored strictly to the current topic
-- Universal font auto-discovery supporting both Devanagari and Latin fonts for milestone badges
+- High-retention cinematic question hooks for Scene 1
+- Emoji-free, clean professional milestone badges & lower thirds
+- Voice tuning optimized for deep studio narration pacing
+- Randomized Wikimedia Commons search tailored strictly to the topic
 """
 
 import asyncio
@@ -32,13 +32,13 @@ LANGUAGE = os.environ.get("LANGUAGE", "hi").strip().lower()  # "hi" or "en"
 if LANGUAGE == "en":
     DEFAULT_VOICE = "en-US-ChristopherNeural"
     DEFAULT_FONT = "DejaVuSans-Bold"
-    VOICE_RATE = "+10%"
-    VOICE_PITCH = "+0Hz"
+    VOICE_RATE = "+8%"
+    VOICE_PITCH = "-2Hz"
 else:
     DEFAULT_VOICE = "hi-IN-SwaraNeural"
     DEFAULT_FONT = "NotoSansDevanagari-Bold"
-    VOICE_RATE = "+14%"
-    VOICE_PITCH = "+1Hz"
+    VOICE_RATE = "+10%"
+    VOICE_PITCH = "-1Hz"
 
 VOICE = os.environ.get("VOICE", DEFAULT_VOICE)
 
@@ -164,39 +164,39 @@ def gemini_json(prompt: str, label: str):
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing (Strictly Topic-Driven) ====================
+# ==================== Script Processing (Documentary Standard) ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
 
 def make_script(topic: str, n_scenes: int) -> dict:
-    log(f"Generating full script in {LANGUAGE.upper()} for exact topic: '{topic}' ({n_scenes} scenes)")
+    log(f"Generating professional documentary script for: '{topic}' ({n_scenes} scenes)")
     
     if LANGUAGE == "en":
         lang_rules = (
-            "- title: Engaging English documentary title matching the topic.\n"
+            "- title: Engaging English documentary title.\n"
             "- description: 2-3 sentence English summary.\n"
-            "- narration: Dynamic, conversational storytelling (28-34 words per scene). SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION directly addressing the topic.\n"
-            "- callout: 2-4 word milestone badge starting with an emoji (e.g., '🌙 01 • The Silence', '✨ 02 • Deep Mind'). Leave empty \"\" if no milestone.\n"
+            "- narration: Deep, professional documentary storytelling (28-34 words per scene). SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION (e.g., 'Did you know that thousands of years ago...').\n"
+            "- callout: Clean 2-4 word milestone badge with NO EMOJIS (e.g., '1459 • Mehrangarh Fort' or 'Battle of Hastings'). Leave empty \"\" if no milestone.\n"
         )
     else:
         lang_rules = (
-            "- title: Engaging Hindi documentary title matching the topic.\n"
+            "- title: Engaging Hindi documentary title.\n"
             "- description: 2-3 sentence Hindi summary.\n"
-            "- narration: जीवंत, रोमांचक और सरल किस्सागोई शैली में हिंदी नरेशन (25-32 शब्द प्रति दृश्य)। पहला दृश्य (Scene 1) इसी विषय पर एक जबरदस्त और जिज्ञासा से भरे सवाल से शुरू होना चाहिए।\n"
-            "- callout: 2-4 word milestone badge starting with an emoji (e.g., '🌙 01 • शुरुआत', '✨ 02 • रहस्य'). Leave empty \"\" if no milestone.\n"
+            "- narration: पेशेवर डॉक्यूमेंट्री शैली में गंभीर और रोमांचक किस्सागोई (25-32 शब्द प्रति दृश्य)। पहला दृश्य (Scene 1) एक जबरदस्त जिज्ञासा भरे सवाल से शुरू होना चाहिए (जैसे: 'क्या आप जानते हैं कि... आदिकाल में...').\n"
+            "- callout: बिना किसी इमोजी के साफ-सुथरा माइलस्टोन बैज (जैसे: '1459 • मेहरानगढ़ दुर्ग' या 'हेस्टिंग्स का युद्ध'). यदि ज़रूरत न हो तो खाली \"\" छोड़ें।\n"
         )
 
     prompt = (
-        f"You are a master documentary storyteller creating a high-retention YouTube video.\n"
+        f"You are a master historical documentary filmmaker creating a high-retention video like IRON AND INK.\n"
         f"Exact Topic / Subject: {topic}\n"
         f"Language: {'English' if LANGUAGE == 'en' else 'Hindi'}\n"
-        f"Create exactly {n_scenes} scenes covering this exact topic from start to finish. DO NOT switch to history or kings unless the topic itself is about history.\n"
-        "CRITICAL RULE FOR IMAGES: Every single scene MUST have a 100% UNIQUE 'image_prompt' directly relevant to what is being narrated in that scene.\n"
+        f"Create exactly {n_scenes} chronological scenes covering this subject from start to finish.\n"
+        "CRITICAL RULE FOR IMAGES: Every single scene MUST have a 100% UNIQUE 'image_prompt' for historical paintings, vintage maps, museum artifacts, or architecture.\n"
         "Guidelines:\n"
-        "- Hook the listener immediately in Scene 1 with dramatic narrative tension and a question about the topic.\n"
+        "- Hook the listener immediately in Scene 1 with dramatic narrative tension and a question.\n"
         f"{lang_rules}"
-        "- image_prompt: 3-5 specific English keywords matching the scene's narration concept. Cinematic, 8k, professional photography style. No text or logos.\n"
+        "- image_prompt: 3-5 specific English keywords for historical artwork, oil paintings, or architecture. Cinematic, 8k, museum lighting. No text or logos.\n"
         "Return pure JSON:\n"
         '{\n'
         '  "title": "Title",\n'
@@ -223,7 +223,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
         "scenes": scenes,
     }
 
-# ==================== High-Res Visuals Engine (Topic-Matched) ====================
+# ==================== High-Res Visuals Engine ====================
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -238,16 +238,16 @@ def fit_cover(img: Image.Image) -> Image.Image:
     return img.resize((W, H), Image.LANCZOS)
 
 def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
-    headers = {"User-Agent": "TopicDocBot/3.0"}
+    headers = {"User-Agent": "DocumentaryBot/5.0"}
     prompt = scene_info.get("image_prompt", "")
     words = [w for w in re.findall(r"\b[A-Za-z]+\b", prompt) if len(w) > 2]
     specific_query = " ".join(words[:4]) if words else topic
     
     query_chain = [
+        f"{specific_query} historical painting",
+        f"{topic} museum art archive",
         prompt,
-        specific_query,
-        f"{topic} cinematic photography",
-        f"{topic} conceptual art"
+        f"{topic} historical architecture"
     ]
     random.shuffle(query_chain)
 
@@ -266,37 +266,37 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
             "format": "json"
         }
         try:
-            r = requests.get(api_url, params=params, headers=headers, timeout=12)
+            r = requests.get(api_url, params=params, headers=headers, timeout=8)
             if r.status_code == 200:
                 pages = r.json().get("query", {}).get("pages", {})
-                page_items = list(pages.items())
-                random.shuffle(page_items)
-                
-                for pid, info in page_items:
+                for pid, info in pages.items():
                     imginfo = info.get("imageinfo", [{}])[0]
                     mime = imginfo.get("mime", "")
                     url = imginfo.get("thumburl") or imginfo.get("url")
                     if url and ("jpeg" in mime or "png" in mime or "jpg" in mime):
-                        img_resp = requests.get(url, headers=headers, timeout=10)
-                        if img_resp.status_code == 200 and len(img_resp.content) > 30000:
+                        img_resp = requests.get(url, headers=headers, timeout=6)
+                        if img_resp.status_code == 200 and len(img_resp.content) > 20000:
                             img = Image.open(io.BytesIO(img_resp.content)).convert("RGB")
-                            if img.width >= 800 and img.height >= 500:
-                                fit_cover(img).save(path, quality=94)
+                            if img.width >= 600 and img.height >= 400:
+                                fit_cover(img).save(path, quality=92)
                                 return True
         except Exception:
             continue
 
-    # AI Fallback matching the scene's exact prompt
-    safe_prompt = quote(f"{prompt}, cinematic documentary still, national geographic style, 8k, sharp focus")
+    # Guaranteed AI Cinematic Fallback
+    safe_prompt = quote(f"{prompt}, oil painting, classical historical artwork, museum lighting, cinematic, 8k")
     ai_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=1280&height=720&seed={seed + random.randint(1,9999)}&nologo=true&model=turbo"
     try:
-        r = requests.get(ai_url, headers=headers, timeout=14)
-        if r.status_code == 200 and len(r.content) > 12000:
+        r = requests.get(ai_url, headers=headers, timeout=10)
+        if r.status_code == 200 and len(r.content) > 10000:
             img = Image.open(io.BytesIO(r.content)).convert("RGB")
             fit_cover(img).save(path, quality=92)
             return True
     except Exception:
         pass
+        
+    cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#10141f:s={W}x{H}:d=1", "-frames:v", "1", str(path)]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return False
 def generate_images(scenes: list, topic: str) -> list:
     n = len(scenes)
@@ -304,10 +304,10 @@ def generate_images(scenes: list, topic: str) -> list:
     for i, sc in enumerate(scenes):
         img = WORK / f"img_{i:03d}.jpg"
         if not (img.exists() and img.stat().st_size > 5000):
-            log(f"Fetching Visual {i + 1}/{n}: {sc['image_prompt'][:45]}...")
+            log(f"Fetching Historical Visual {i + 1}/{n}: {sc['image_prompt'][:45]}...")
             ok = fetch_image(sc, img, seed=8000 + (i * 47), topic=topic)
             if not ok:
-                cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#141c26:s={W}x{H}:d=1", "-frames:v", "1", str(img)]
+                cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#10141f:s={W}x{H}:d=1", "-frames:v", "1", str(img)]
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(1.5)
         paths.append(img)
@@ -371,17 +371,17 @@ def create_subtitles(scenes: list, durs: list, srt_path: Path):
             sub_idx += 1
     srt_path.write_text("\n".join(lines), encoding="utf-8")
 
-# ==================== Dynamic Cinematic FX & Emoji-Safe Callouts ====================
+# ==================== Cinematic Motion & Emoji-Free Callout Boxes ====================
 def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> str:
     f = frames
     cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
     
+    # Smooth documentary Ken Burns camera movements
     fx_styles = [
-        (f"1+0.14*on/{f}", cx, cy),
-        (f"1.14-0.14*on/{f}", cx, cy),
-        ("1.1", f"(iw-iw/zoom)*on/{f}", cy),
-        ("1.1", f"(iw-iw/zoom)*(1-on/{f})", cy),
-        (f"1+0.08*on/{f}", f"(ih-ih/zoom)*on/{f}", f"(ih-ih/zoom)*on/{f}"),
+        (f"1+0.12*on/{f}", cx, cy),
+        (f"1.12-0.12*on/{f}", cx, cy),
+        ("1.08", f"(iw-iw/zoom)*on/{f}", cy),
+        ("1.08", f"(iw-iw/zoom)*(1-on/{f})", cy),
     ]
     z, x, y = fx_styles[i % len(fx_styles)]
 
@@ -392,8 +392,8 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     )
 
     if callout and len(callout.strip()) > 1:
-        # Clean text for English fonts while keeping basic symbols
-        clean_callout = re.sub(r'[^\w\s\d\•\-\,\.\(\)\🌙✨🔥⚡]', '', callout).strip()
+        # STRICTLY REMOVE ALL EMOJIS AND UNSUPPORTED SYMBOLS FOR CLEAN TEXT RENDERING
+        clean_callout = re.sub(r'[^\w\s\d\•\-\,\.\(\)]', '', callout).strip()
         
         if len(clean_callout) > 1:
             badge_duration = min(3.0, dur * 0.6) if dur > 1.5 else dur
@@ -401,7 +401,7 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
             font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else f"font='{DEFAULT_FONT}'"
 
             vf += (
-                f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.80:t=fill:enable='between(t,0.3,{badge_duration})'"
+                f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.85:t=fill:enable='between(t,0.3,{badge_duration})'"
                 f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.3,{badge_duration})'"
                 f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=22:x=105:y=98:"
                 f"{font_opt}:enable='between(t,0.3,{badge_duration})'"
@@ -427,10 +427,10 @@ def build_video(data: dict) -> None:
     topic = data.get("topic", "History")
     n = len(scenes)
 
-    log("=== Step 1/3: Generating Topic-Specific Visuals ===")
+    log("=== Step 1/3: Generating Historical Visuals ===")
     imgs = generate_images(scenes, topic=topic)
 
-    log("=== Step 2/3: Recording Narration ===")
+    log("=== Step 2/3: Recording Documentary Narration ===")
     auds, durs = [], []
     for i, sc in enumerate(scenes):
         aud = WORK / f"aud_{i:03d}.mp3"
@@ -440,7 +440,7 @@ def build_video(data: dict) -> None:
         auds.append(aud)
         durs.append(audio_duration(aud) + 0.3)
 
-    log("=== Step 3/3: Rendering Motion, Callout Badges & Subtitles ===")
+    log("=== Step 3/3: Rendering Motion, Clean Badges & Subtitles ===")
     clips = []
     for i in range(n):
         clip = WORK / f"clip_{i:03d}.mp4"
@@ -470,7 +470,7 @@ def build_video(data: dict) -> None:
         "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=55,Alignment=2'"
     )
 
-    log("Burning in clean dynamic subtitles...")
+    log("Burning in clean documentary subtitles...")
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw_concat),
          "-vf", subtitle_filter, "-c:v", "libx264", "-crf", "22", "-preset", "veryfast",
@@ -482,7 +482,7 @@ def build_video(data: dict) -> None:
 # ==================== Main Runner ====================
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "full"
-    topic = os.environ.get("TOPIC", "General Knowledge").strip()
+    topic = os.environ.get("TOPIC", "The Entire History of England").strip()
     n = int(os.environ.get("SCENES", "24") or 24)
 
     if mode == "full" and os.environ.get("RESUME") != "1":
@@ -508,4 +508,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-        
+    
