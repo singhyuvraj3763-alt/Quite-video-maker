@@ -44,19 +44,18 @@ LANGUAGE = os.environ.get("LANGUAGE", "hi").strip().lower()  # "hi" or "en"
 if LANGUAGE == "en":
     DEFAULT_VOICE = "en-US-ChristopherNeural"
     DEFAULT_FONT = "DejaVuSans-Bold"
-    VOICE_RATE = "-4%"
-    VOICE_PITCH = "-2Hz"
+    DEFAULT_RATE = "+12%"
 else:
     DEFAULT_VOICE = "hi-IN-MadhurNeural"  # deeper male storyteller voice. Old one: hi-IN-SwaraNeural
     DEFAULT_FONT = "NotoSansDevanagari-Bold"
-    VOICE_RATE = "-4%"
-    VOICE_PITCH = "-2Hz"
+    DEFAULT_RATE = "+14%"
 
+VOICE_RATE = os.environ.get("VOICE_RATE", DEFAULT_RATE).strip()   # speed. Try +8% (calmer) to +20% (very fast)
+VOICE_PITCH = os.environ.get("VOICE_PITCH", "+0Hz").strip()
 VOICE = os.environ.get("VOICE", DEFAULT_VOICE)
 
 # Pause (seconds) added after a line's voice. Gemini picks one per line.
-PAUSES = {"short": 0.25, "medium": 0.6, "long": 1.0, "dramatic": 1.5}
-
+PAUSES = {"short": 0.12, "medium": 0.3, "long": 0.55, "dramatic": 0.9}
 STYLE = os.environ.get(
     "STYLE",
     "cinematic historical illustration, painterly, dramatic lighting, rich warm earthy tones, "
