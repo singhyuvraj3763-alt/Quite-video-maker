@@ -4,17 +4,29 @@ on:
   workflow_dispatch:
     inputs:
       topic:
-        description: "Video topic"
+        description: "Video topic (keep the SAME for every part)"
         required: true
-        default: "Battle of Haldighati"
+        default: "History of England"
+      part:
+        description: "Which part is this? (1, 2, 3...)"
+        required: true
+        default: "1"
+      total_parts:
+        description: "How many parts in total? (1 = single video)"
+        required: true
+        default: "1"
+      part_focus:
+        description: "What THIS part covers (recommended for series)"
+        required: false
+        default: ""
       language:
         description: "hi or en"
         required: true
         default: "hi"
       scenes:
-        description: "Number of scenes (3 lines each)"
+        description: "Number of scenes (3 images each)"
         required: true
-        default: "20"
+        default: "15"
       style:
         description: "Image style line (optional)"
         required: false
@@ -50,6 +62,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           POLLINATIONS_TOKEN: ${{ secrets.POLLINATIONS_TOKEN }}
           TOPIC: ${{ github.event.inputs.topic }}
+          PART: ${{ github.event.inputs.part }}
+          TOTAL_PARTS: ${{ github.event.inputs.total_parts }}
+          PART_FOCUS: ${{ github.event.inputs.part_focus }}
           LANGUAGE: ${{ github.event.inputs.language }}
           SCENES: ${{ github.event.inputs.scenes }}
           RESUME: ${{ github.event.inputs.resume }}
@@ -63,7 +78,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: documentary-video
+          name: documentary-video-part-${{ github.event.inputs.part }}
           path: |
             out/
             script.json
