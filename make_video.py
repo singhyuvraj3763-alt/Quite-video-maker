@@ -1,9 +1,9 @@
 """
-Professional Cinematic Documentary Automation Pipeline (IRON & INK Style - Hugging Face Edition)
-- Hugging Face FLUX.1-schnell Image Generator API integration with strict safety timers
-- Language-Specific Font Engine: Isolates Latin vs Devanagari fonts to prevent '▯▯▯' box bugs
-- Zero-Dark-Screen Guarantee: Smart visual remix and textured vintage canvas fallbacks
-- Harmonic Documentary Ambient Scoring and Edge-TTS Deep Narration Pacing
+Professional Cinematic Documentary Automation Pipeline (Synchronized Multi-Beat Visual Edition)
+- Perfectly Synced Multi-Beat Visuals: Changes images every 2-3 seconds to match narration beats.
+- Strict Keyword-to-Image Mapping: Eliminates mismatched imagery by tying visuals directly to spoken words.
+- Language-Aware Font Engine: Isolates Latin vs Devanagari fonts to prevent '▯▯▯' box bugs.
+- Harmonic Documentary Ambient Scoring and Edge-TTS Deep Narration Pacing.
 """
 
 import asyncio
@@ -44,7 +44,6 @@ WORK = Path("work")
 OUT = Path("out")
 
 BAD_WORDS = ("image", "tts", "live", "audio", "embed", "robotics", "computer", "vision")
-_used_prompts = set()
 
 def fatal(msg: str) -> None:
     print("\nERROR: " + msg, flush=True)
@@ -172,27 +171,29 @@ def gemini_json(prompt: str, label: str):
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing ====================
+# ==================== Script Processing with Multi-Beat Sub-Prompts ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
 
 def make_script(topic: str, n_scenes: int) -> dict:
-    log(f"Generating professional documentary script for: '{topic}' ({n_scenes} scenes)")
+    log(f"Generating synchronized documentary script for: '{topic}' ({n_scenes} scenes)")
     
     if LANGUAGE == "en":
         lang_rules = (
             "- title: Engaging English documentary title.\n"
             "- description: 2-3 sentence English summary.\n"
             "- narration: Deep documentary storytelling (26-32 words per scene). SCENE 1 MUST START WITH A QUESTION.\n"
-            "- callout: Clean 2-4 word milestone badge using plain English letters and numbers, NO EMOJIS (e.g., '753 BC - Founding of Rome').\n"
+            "- callout: Clean 2-4 word milestone badge using plain English letters and numbers, NO EMOJIS.\n"
+            "- beats: Exactly 3 distinct, highly descriptive English image prompts (6-9 words each) that match the exact micro-events spoken during the beginning, middle, and end of this scene's narration.\n"
         )
     else:
         lang_rules = (
             "- title: Engaging Hindi documentary title.\n"
             "- description: 2-3 sentence Hindi summary.\n"
             "- narration: पेशेवर डॉक्यूमेंट्री शैली में गंभीर किस्सागोई (25-32 शब्द प्रति दृश्य)। पहला दृश्य सवाल से शुरू हो।\n"
-            "- callout: बिना किसी इमोजी के साफ-सुथरा माइलस्टोन बैज (जैसे: '1459 - मेहरानगढ़ दुर्ग').\n"
+            "- callout: बिना किसी इमोजी के साफ-सुथरा माइलस्टोन बैज।\n"
+            "- beats: दृश्य के शुरुआती, मध्य और अंतिम भाग में बोले जाने वाले शब्दों से सटीक मेल खाने वाले ठीक 3 अंग्रेजी इमेज प्रॉम्प्ट (प्रत्येक 6-9 शब्द)।\n"
         )
 
     prompt = (
@@ -200,34 +201,41 @@ def make_script(topic: str, n_scenes: int) -> dict:
         f"Exact Topic / Subject: {topic}\n"
         f"Language: {'English' if LANGUAGE == 'en' else 'Hindi'}\n"
         f"Create exactly {n_scenes} chronological scenes covering this subject.\n"
-        f"{lang_rules}"
-        "- image_prompt: 6-10 descriptive English words for a classical oil painting or historical scene (e.g., 'Roman legions marching across snowy Alps oil painting').\n"
+        f"{lang_rules}\n"
         "Return pure JSON:\n"
         '{\n'
         '  "title": "Title",\n'
         '  "description": "Summary",\n'
         '  "scenes": [\n'
-        '    {"narration": "...", "image_prompt": "...", "callout": "..."}\n'
+        '    {\n'
+        '      "narration": "...",\n'
+        '      "callout": "...",\n'
+        '      "beats": ["prompt for start", "prompt for middle", "prompt for end"]\n'
+        '    }\n'
         '  ]\n'
         '}'
     )
     data = gemini_json(prompt, label="full_script")
     scenes = []
     for s in data.get("scenes", [])[:n_scenes]:
+        beats = s.get("beats", [])
+        if not isinstance(beats, list) or len(beats) < 3:
+            base_p = s.get("image_prompt", topic)
+            beats = [base_p, base_p, base_p]
         scenes.append({
             "narration": clean_text(s.get("narration", "")),
-            "image_prompt": clean_text(s.get("image_prompt", "")),
-            "callout": clean_text(s.get("callout", ""))
+            "callout": clean_text(s.get("callout", "")),
+            "beats": [clean_text(b) for b in beats[:3]]
         })
 
-    log(f"Script generated successfully: {len(scenes)} scenes ready.")
+    log(f"Script generated successfully: {len(scenes)} synchronized scenes ready.")
     return {
         "topic": topic,
         "title": clean_text(data.get("title", topic)),
         "description": clean_text(data.get("description", "")),
         "scenes": scenes,
-                                  }
-    # ==================== Hugging Face FLUX Visuals Engine with Rate-Limit Timers ====================
+    }
+    # ==================== Hugging Face FLUX Multi-Beat Visual Engine ====================
 def fit_cover(img: Image.Image) -> Image.Image:
     w, h = img.size
     target = W / H
@@ -257,10 +265,9 @@ def create_vintage_canvas(path: Path, seed: int) -> None:
                         px[x + dx, y + dy] = (r, g, b)
     base.save(path, quality=92)
 
-def fetch_image_hf(scene_info: dict, path: Path, seed: int, topic: str, prev_images: list) -> bool:
+def fetch_image_hf(prompt_text: str, path: Path, seed: int, topic: str, prev_images: list) -> bool:
     hf_key = os.environ.get("HF_TOKEN", "").strip()
-    prompt = scene_info.get("image_prompt", "") or topic
-    full_prompt = f"{prompt}, classical historical oil painting, museum masterpiece, cinematic museum lighting, 8k"
+    full_prompt = f"{prompt_text or topic}, classical historical oil painting, museum masterpiece, cinematic lighting, 8k"
 
     if hf_key:
         api_url = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
@@ -272,18 +279,16 @@ def fetch_image_hf(scene_info: dict, path: Path, seed: int, topic: str, prev_ima
         
         for attempt in range(3):
             try:
-                time.sleep(4.0)
-                r = requests.post(api_url, headers=headers, json=payload, timeout=45)
+                time.sleep(3.5) # Safe rate-limit delay
+                r = requests.post(api_url, headers=headers, json=payload, timeout=40)
                 if r.status_code == 200 and len(r.content) > 15000:
                     img = Image.open(io.BytesIO(r.content)).convert("RGB")
                     fit_cover(img).save(path, quality=94)
-                    log("  [OK] Hugging Face FLUX visual generated successfully.")
                     return True
                 elif r.status_code == 503:
-                    log(f"  [Info] Model loading on HF, retrying in {5 * (attempt + 1)}s...")
                     time.sleep(5 * (attempt + 1))
             except Exception:
-                time.sleep(3)
+                time.sleep(2)
 
     if prev_images:
         try:
@@ -291,29 +296,13 @@ def fetch_image_hf(scene_info: dict, path: Path, seed: int, topic: str, prev_ima
             src_img = ImageOps.mirror(src_img)
             w, h = src_img.size
             cropped = src_img.crop((int(w * 0.08), int(h * 0.08), int(w * 0.92), int(h * 0.92))).resize((W, H), Image.LANCZOS)
-            cropped = ImageEnhance.Color(cropped).enhance(0.85)
             cropped.save(path, quality=92)
-            log("  [OK] Remixed existing scene visual (zero dark screen fallback).")
             return True
         except Exception:
             pass
 
     create_vintage_canvas(path, seed)
     return False
-
-def generate_images(scenes: list, topic: str) -> list:
-    n = len(scenes)
-    paths = []
-    valid_prev = []
-    for i, sc in enumerate(scenes):
-        img = WORK / f"img_{i:03d}.jpg"
-        if not (img.exists() and img.stat().st_size > 10000):
-            log(f"Generating Visual {i + 1}/{n}: '{sc['image_prompt'][:35]}...'")
-            fetch_image_hf(sc, img, seed=8000 + (i * 47), topic=topic, prev_images=valid_prev)
-        if img.exists() and img.stat().st_size > 10000:
-            valid_prev.append(img)
-        paths.append(img)
-    return paths
 
 # ==================== Voiceover Engine ====================
 async def _edge(text: str, path: Path) -> None:
@@ -373,57 +362,79 @@ def create_subtitles(scenes: list, durs: list, srt_path: Path):
             sub_idx += 1
     srt_path.write_text("\n".join(lines), encoding="utf-8")
 
-# ==================== Cinematic Motion & Glyph-Safe Callout Badges ====================
-def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> str:
-    f = frames
-    cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+# ==================== Multi-Beat Sub-Clip Rendering ====================
+def render_multi_beat_clip(scene_data: dict, aud_path: Path, clip_path: Path, scene_idx: int, total_dur: float, topic: str, valid_prev: list) -> None:
+    beats = scene_data.get("beats", [topic, topic, topic])
+    n_beats = len(beats)
+    beat_dur = total_dur / n_beats
     
-    fx_styles = [
-        (f"1+0.12*on/{f}", cx, cy),
-        (f"1.12-0.12*on/{f}", cx, cy),
-        ("1.08", f"(iw-iw/zoom)*on/{f}", cy),
-        ("1.08", f"(iw-iw/zoom)*(1-on/{f})", cy),
-    ]
-    z, x, y = fx_styles[i % len(fx_styles)]
+    beat_clips = []
+    for b_idx, beat_prompt in enumerate(beats):
+        b_img = WORK / f"scene_{scene_idx:03d}_beat_{b_idx}.jpg"
+        if not (b_img.exists() and b_img.stat().st_size > 10000):
+            log(f"  Generating Scene {scene_idx + 1} Beat {b_idx + 1}/3: '{beat_prompt[:30]}...'")
+            fetch_image_hf(beat_prompt, b_img, seed=9000 + (scene_idx * 100) + b_idx, topic=topic, prev_images=valid_prev)
+            if b_img.exists() and b_img.stat().st_size > 10000:
+                valid_prev.append(b_img)
+        
+        # Render individual 2.5s sub-clip with motion
+        sub_tmp = WORK / f"sub_{scene_idx}_{b_idx}.mp4"
+        frames = int(beat_dur * FPS)
+        cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+        z = f"1+0.08*on/{frames}" if b_idx % 2 == 0 else f"1.08-0.08*on/{frames}"
+        
+        vf = (
+            f"crop=iw:ih-45:0:0,"
+            f"scale=3840:2160:flags=lanczos,"
+            f"zoompan=z='{z}':x='{cx}':y='{cy}':d={frames}:s={W}x{H}:fps={FPS},format=yuv420p"
+        )
+        
+        # Add callout badge ONLY on the first beat of the scene
+        if b_idx == 0 and scene_data.get("callout"):
+            callout = scene_data["callout"]
+            normalized = callout.replace("•", "-").replace(":", " - ").replace("'", "").replace('"', "")
+            if LANGUAGE == "en":
+                clean_callout = re.sub(r"[^a-zA-Z0-9\s\-\,\.\(\)]", "", normalized).strip()
+            else:
+                clean_callout = re.sub(r"[^\w\s\d\-\,\.\(\)\u0900-\u097F]", "", normalized).strip()
+            clean_callout = re.sub(r"\s+", " ", clean_callout)
+            
+            if len(clean_callout) > 1:
+                badge_dur = min(3.0, beat_dur * 0.8)
+                box_w = max(240, min(880, len(clean_callout) * 14 + 55))
+                font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else f"font='{DEFAULT_FONT}'"
+                vf += (
+                    f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.85:t=fill:enable='between(t,0.2,{badge_dur})'"
+                    f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.2,{badge_dur})'"
+                    f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=23:x=105:y=98:"
+                    f"{font_opt}:enable='between(t,0.2,{badge_dur})'"
+                )
 
-    vf = (
-        f"crop=iw:ih-45:0:0,"
-        f"scale=3840:2160:flags=lanczos,"
-        f"zoompan=z='{z}':x='{x}':y='{y}':d={f}:s={W}x{H}:fps={FPS},format=yuv420p"
-    )
+        subprocess.run([
+            "ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-i", str(b_img),
+            "-vf", vf, "-t", f"{beat_dur:.3f}", "-r", str(FPS),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", str(sub_tmp)
+        ], check=True)
+        beat_clips.append(sub_tmp)
 
-    if callout and len(callout.strip()) > 1:
-        normalized = callout.replace("•", "-").replace(":", " - ").replace("'", "").replace('"', "")
-        if LANGUAGE == "en":
-            clean_callout = re.sub(r"[^a-zA-Z0-9\s\-\,\.\(\)]", "", normalized).strip()
-        else:
-            clean_callout = re.sub(r"[^\w\s\d\-\,\.\(\)\u0900-\u097F]", "", normalized).strip()
-        clean_callout = re.sub(r"\s+", " ", clean_callout)
+    # Concat the 3 beats together for this scene
+    beat_list = WORK / f"beats_{scene_idx}.txt"
+    beat_list.write_text("".join(f"file '{bc.resolve()}'\n" for bc in beat_clips))
+    
+    scene_video_only = WORK / f"scene_video_{scene_idx}.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+        "-i", str(beat_list), "-c", "copy", str(scene_video_only)
+    ], check=True)
 
-        if len(clean_callout) > 1:
-            badge_duration = min(3.5, dur * 0.65) if dur > 1.5 else dur
-            box_w = max(240, min(880, len(clean_callout) * 14 + 55))
-            font_opt = f"fontfile='{FONT_FILE}'" if FONT_FILE else f"font='{DEFAULT_FONT}'"
-
-            vf += (
-                f",drawbox=x=80:y=80:w={box_w}:h=60:color=black@0.85:t=fill:enable='between(t,0.3,{badge_duration})'"
-                f",drawbox=x=80:y=80:w=6:h=60:color=#E63946:t=fill:enable='between(t,0.3,{badge_duration})'"
-                f",drawtext=text='{clean_callout}':fontcolor=white:fontsize=23:x=105:y=98:"
-                f"{font_opt}:enable='between(t,0.3,{badge_duration})'"
-            )
-    return vf
-
-def render_clip(img: Path, aud: Path, clip: Path, i: int, dur: float, callout: str) -> None:
-    tmp = clip.with_name(clip.stem + ".tmp.mp4")
-    cmd = [
-        "ffmpeg", "-y", "-loglevel", "error", "-i", str(img), "-i", str(aud),
-        "-vf", motion_and_callout_filter(i, int(dur * FPS), callout, dur), "-af", "apad",
-        "-t", f"{dur:.3f}", "-r", str(FPS),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-        "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k", str(tmp)
-    ]
-    subprocess.run(cmd, check=True)
-    os.replace(tmp, clip)
+    # Merge with scene audio
+    tmp_clip = clip_path.with_name(clip_path.stem + ".tmp.mp4")
+    subprocess.run([
+        "ffmpeg", "-y", "-loglevel", "error", "-i", str(scene_video_only), "-i", str(aud_path),
+        "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+        "-shortest", str(tmp_clip)
+    ], check=True)
+    os.replace(tmp_clip, clip_path)
 
 def build_video(data: dict) -> None:
     WORK.mkdir(exist_ok=True)
@@ -432,10 +443,7 @@ def build_video(data: dict) -> None:
     topic = data.get("topic", "History")
     n = len(scenes)
 
-    log("=== Step 1/3: Generating Hugging Face FLUX Visuals ===")
-    imgs = generate_images(scenes, topic=topic)
-
-    log("=== Step 2/3: Recording Documentary Narration ===")
+    log("=== Step 1/2: Recording Documentary Narration ===")
     auds, durs = [], []
     for i, sc in enumerate(scenes):
         aud = WORK / f"aud_{i:03d}.mp3"
@@ -443,15 +451,16 @@ def build_video(data: dict) -> None:
             log(f"Recording Scene {i + 1}/{n}...")
             speak(sc["narration"], aud)
         auds.append(aud)
-        durs.append(audio_duration(aud) + 0.3)
+        durs.append(audio_duration(aud) + 0.4)
 
-    log("=== Step 3/3: Rendering Motion, Clean Badges & Subtitles ===")
+    log("=== Step 2/2: Generating Multi-Beat Synchronized Visuals & Rendering ===")
     clips = []
+    valid_prev = []
     for i in range(n):
         clip = WORK / f"clip_{i:03d}.mp4"
-        callout_text = scenes[i].get("callout", "")
         if not (clip.exists() and clip.stat().st_size > 1000):
-            render_clip(imgs[i], auds[i], clip, i, durs[i], callout_text)
+            log(f"Processing Scene {i + 1}/{n} (Multi-Beat Sync)...")
+            render_multi_beat_clip(scenes[i], auds[i], clip, i, durs[i], topic, valid_prev)
         clips.append(clip)
 
     listfile = WORK / "list.txt"
@@ -483,7 +492,6 @@ def build_video(data: dict) -> None:
 
     video_with_audio = WORK / "video_with_audio.mp4"
     if bg_music.exists() and bg_music.stat().st_size > 1000:
-        log("Mixing background score with narration...")
         subprocess.run([
             "ffmpeg", "-y", "-loglevel", "error",
             "-i", str(raw_concat), "-i", str(bg_music),
