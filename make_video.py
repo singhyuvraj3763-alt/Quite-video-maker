@@ -1,6 +1,6 @@
 """
 Professional Cinematic Documentary Automation Pipeline (IRON & INK Style)
-- Auto-discovers active Gemini models (prioritizing Flash-Lite & Flash)
+- Dynamic topic-matched background atmosphere and audio scoring
 - Seamless English & Hindi support via LANGUAGE environment variable ("hi" or "en")
 - High-retention question hooks for Scene 1 + mid-video narrative tension twists
 - Emoji-free, clean professional milestone badges & lower thirds
@@ -164,7 +164,7 @@ def gemini_json(prompt: str, label: str):
 
     sys.exit(f"Failed to generate script across all discovered models for '{label}'.")
 
-# ==================== Script Processing with Mid-Video Hooks ====================
+# ==================== Script Processing with Hooks ====================
 def clean_text(t: str) -> str:
     t = re.sub(r"[*_#>`\[\]{}]", "", t or "")
     return re.sub(r"\s+", " ", t).strip()
@@ -177,8 +177,8 @@ def make_script(topic: str, n_scenes: int) -> dict:
             "- title: Engaging English documentary title.\n"
             "- description: 2-3 sentence English summary.\n"
             "- narration: Deep, professional documentary storytelling (28-34 words per scene).\n"
-            "  * SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION (e.g., 'Did you know that...').\n"
-            "  * MID-VIDEO SCENES (around 35% and 70% through) MUST INCLUDE PATTERN INTERRUPTS / MINI-HOOKS (e.g., 'Just when everything seemed lost, a terrifying new threat emerged...').\n"
+            "  * SCENE 1 MUST START WITH A POWERFUL CURIOUS HOOK AND QUESTION.\n"
+            "  * MID-VIDEO SCENES (around 35% and 70% through) MUST INCLUDE PATTERN INTERRUPTS / MINI-HOOKS.\n"
             "- callout: Clean 2-4 word milestone badge with NO EMOJIS (e.g., '1459 • Mehrangarh Fort'). Leave empty \"\" if no milestone.\n"
         )
     else:
@@ -187,7 +187,7 @@ def make_script(topic: str, n_scenes: int) -> dict:
             "- description: 2-3 sentence Hindi summary.\n"
             "- narration: पेशेवर डॉक्यूमेंट्री शैली में गंभीर और रोमांचक किस्सागोई (25-32 शब्द प्रति दृश्य)।\n"
             "  * पहला दृश्य (Scene 1) एक जबरदस्त जिज्ञासा भरे सवाल से शुरू होना चाहिए।\n"
-            "  * बीच के दृश्यों (लगभग 35% और 70% हिस्से पर) में एक मिनी-हुक या रोमांचक मोड़ (Pattern Interrupt) जरूर होना चाहिए (जैसे: 'लेकिन तभी एक ऐसा खौफनाक मंजर सामने आया...').\n"
+            "  * बीच के दृश्यों (लगभग 35% और 70% हिस्से पर) में एक मिनी-हुक या रोमांचक मोड़ जरूर होना चाहिए।\n"
             "- callout: बिना किसी इमोजी के साफ-सुथरा माइलस्टोन बैज (जैसे: '1459 • मेहरानगढ़ दुर्ग'). यदि ज़रूरत न हो तो खाली \"\" छोड़ें。\n"
         )
 
@@ -242,7 +242,7 @@ def fit_cover(img: Image.Image) -> Image.Image:
     return img.resize((W, H), Image.LANCZOS)
 
 def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
-    headers = {"User-Agent": "DocumentaryBot/5.0"}
+    headers = {"User-Agent": "DocumentaryBot/6.0"}
     prompt = scene_info.get("image_prompt", "")
     words = [w for w in re.findall(r"\b[A-Za-z]+\b", prompt) if len(w) > 2]
     specific_query = " ".join(words[:4]) if words else topic
@@ -287,19 +287,20 @@ def fetch_image(scene_info: dict, path: Path, seed: int, topic: str) -> bool:
         except Exception:
             continue
 
-    # Guaranteed AI Cinematic Fallback (Prevents dark screens)
+    # Guaranteed AI Cinematic Fallback (Prevents pitch black screens)
     safe_prompt = quote(f"{prompt}, oil painting, classical historical artwork, museum lighting, cinematic, 8k")
     ai_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=1280&height=720&seed={seed + random.randint(1,9999)}&nologo=true&model=turbo"
-    try:
-        r = requests.get(ai_url, headers=headers, timeout=10)
-        if r.status_code == 200 and len(r.content) > 10000:
-            img = Image.open(io.BytesIO(r.content)).convert("RGB")
-            fit_cover(img).save(path, quality=92)
-            return True
-    except Exception:
-        pass
+    for _ in range(3):
+        try:
+            r = requests.get(ai_url, headers=headers, timeout=10)
+            if r.status_code == 200 and len(r.content) > 10000:
+                img = Image.open(io.BytesIO(r.content)).convert("RGB")
+                fit_cover(img).save(path, quality=92)
+                return True
+        except Exception:
+            time.sleep(1)
         
-    cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#10141f:s={W}x{H}:d=1", "-frames:v", "1", str(path)]
+    cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#141b2d:s={W}x{H}:d=1", "-frames:v", "1", str(path)]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return False
 def generate_images(scenes: list, topic: str) -> list:
@@ -311,7 +312,7 @@ def generate_images(scenes: list, topic: str) -> list:
             log(f"Fetching Historical Visual {i + 1}/{n}: {sc['image_prompt'][:45]}...")
             ok = fetch_image(sc, img, seed=8000 + (i * 47), topic=topic)
             if not ok:
-                cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#10141f:s={W}x{H}:d=1", "-frames:v", "1", str(img)]
+                cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=#141b2d:s={W}x{H}:d=1", "-frames:v", "1", str(img)]
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(1.5)
         paths.append(img)
@@ -395,7 +396,6 @@ def motion_and_callout_filter(i: int, frames: int, callout: str, dur: float) -> 
     )
 
     if callout and len(callout.strip()) > 1:
-        # STRICTLY STRIP EMOJIS SO FONT RENDERING NEVER FAILS
         clean_callout = re.sub(r'[^\w\s\d\•\-\,\.\(\)]', '', callout).strip()
         
         if len(clean_callout) > 1:
@@ -465,6 +465,30 @@ def build_video(data: dict) -> None:
     srt_path = WORK / "subtitles.srt"
     create_subtitles(scenes, durs, srt_path)
 
+    # Topic-Matched Ambient/Cinematic Music Generation
+    log("Synthesizing topic-matched background atmosphere...")
+    bg_music = WORK / "bg_music.mp3"
+    # Generates a subtle, low-frequency atmospheric drone matching documentary tension
+    total_dur = sum(durs)
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", 
+        "-i", f"aevalsrc='sin(40*2*PI*t)*0.03 + sin(80*2*PI*t)*0.01':s=44100:d={total_dur}",
+        "-af", "lowpass=f=300,volume=0.15", 
+        str(bg_music)
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    video_with_audio = WORK / "video_with_audio.mp4"
+    if bg_music.exists() and bg_music.stat().st_size > 1000:
+        log("Mixing cinematic background atmosphere with voiceover...")
+        subprocess.run([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(raw_concat), "-i", str(bg_music),
+            "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:weights=1 0.2[a]",
+            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", str(video_with_audio)
+        ], check=True)
+    else:
+        video_with_audio = raw_concat
+
     final = OUT / "final.mp4"
     sub_font = "Noto Sans Devanagari" if LANGUAGE == "hi" else "DejaVu Sans"
     subtitle_filter = (
@@ -475,7 +499,7 @@ def build_video(data: dict) -> None:
 
     log("Burning in clean documentary subtitles...")
     subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw_concat),
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video_with_audio),
          "-vf", subtitle_filter, "-c:v", "libx264", "-crf", "22", "-preset", "veryfast",
          "-c:a", "copy", "-movflags", "+faststart", str(final)],
         check=True
@@ -511,4 +535,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-        
+    
